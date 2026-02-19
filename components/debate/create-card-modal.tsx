@@ -21,8 +21,9 @@ import { Check } from "lucide-react";
 interface CreateCardModalProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (card: DebateCardData) => void;
+  onSubmit: (card: DebateCardData) => void | Promise<void>;
   defaultCategory: "trending" | "continue" | "recommended";
+  submitting?: boolean;
 }
 
 export function CreateCardModal({
@@ -30,6 +31,7 @@ export function CreateCardModal({
   onClose,
   onSubmit,
   defaultCategory,
+  submitting = false,
 }: CreateCardModalProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -46,7 +48,7 @@ export function CreateCardModal({
     });
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!title.trim() || !description.trim() || selectedSdgs.length === 0)
       return;
 
@@ -60,7 +62,7 @@ export function CreateCardModal({
       createdAt: new Date().toISOString().split("T")[0],
     };
 
-    onSubmit(newCard);
+    await onSubmit(newCard);
     setTitle("");
     setDescription("");
     setVideoUrl("");
@@ -171,8 +173,8 @@ export function CreateCardModal({
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={!isValid}>
-            Create Topic
+          <Button onClick={handleSubmit} disabled={!isValid || submitting}>
+            {submitting ? "Creating…" : "Create Topic"}
           </Button>
         </DialogFooter>
       </DialogContent>

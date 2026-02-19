@@ -17,6 +17,7 @@ interface AppShellProps {
   learningHubContent: ReactNode;
   profileContent: ReactNode;
   userProfile: UserProfile;
+  initialFriendsInvite?: string;
 }
 
 type Tab = "browse" | "learning" | "profile";
@@ -32,13 +33,19 @@ export function AppShell({
   learningHubContent,
   profileContent,
   userProfile,
+  initialFriendsInvite,
 }: AppShellProps) {
   const [activeTab, setActiveTab] = useState<Tab>("browse");
-  const [showFriends, setShowFriends] = useState(false);
+  const [showFriends, setShowFriends] = useState(!!initialFriendsInvite);
 
   // If friends page is open, render it
   if (showFriends) {
-    return <FriendsPage onBack={() => setShowFriends(false)} />;
+    return (
+      <FriendsPage
+        onBack={() => setShowFriends(false)}
+        initialInviteCode={initialFriendsInvite}
+      />
+    );
   }
 
   return (

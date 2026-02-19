@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { CardSection } from "@/components/debate/card-section";
 import { CardViewModal } from "@/components/debate/card-view-modal";
 import { DedicatedTopicPage } from "@/components/debate/dedicated-topic-page";
@@ -8,38 +8,55 @@ import { CreateCardModal } from "@/components/debate/create-card-modal";
 import { ExpandedListPage } from "@/components/debate/expanded-list-page";
 import {
   DebateCard,
-  getCardsByCategory,
   type DebateCardData,
 } from "@/lib/models/debate-card";
+import {
+  subscribeDebates,
+  createDebate,
+  seedDebatesIfEmpty,
+  type DebateCategory,
+} from "@/lib/debate-service";
+import { useAuth } from "@/hooks/useAuth";
 import { TrendingUp, Play, Sparkles } from "lucide-react";
 
 type View =
   | { type: "browse" }
   | { type: "dedicated"; card: DebateCard }
-  | { type: "expanded"; title: string; category: "trending" | "continue" | "recommended" };
+  | { type: "expanded"; title: string; category: DebateCategory };
+
+function getCardsByCategory(
+  cards: DebateCard[],
+  category: DebateCategory
+): DebateCard[] {
+  return cards.filter((c) => c.category === category);
+}
 
 export function BrowsePage() {
-  const [trendingCards, setTrendingCards] = useState<DebateCard[]>(() =>
-    getCardsByCategory("trending")
-  );
-  const [continueCards, setContinueCards] = useState<DebateCard[]>(() =>
-    getCardsByCategory("continue")
-  );
-  const [recommendedCards, setRecommendedCards] = useState<DebateCard[]>(() =>
-    getCardsByCategory("recommended")
-  );
+  const { user } = useAuth();
+  const [allCards, setAllCards] = useState<DebateCard[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [currentView, setCurrentView] = useState<View>({ type: "browse" });
 
-  // Card View modal state
   const [cardViewCard, setCardViewCard] = useState<DebateCard | null>(null);
   const [cardViewOpen, setCardViewOpen] = useState(false);
 
-  // Create modal state
   const [createOpen, setCreateOpen] = useState(false);
-  const [createCategory, setCreateCategory] = useState<
-    "trending" | "continue" | "recommended"
-  >("trending");
+  const [createCategory, setCreateCategory] = useState<DebateCategory>("trending");
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const unsub = subscribeDebates((cards) => {
+      setAllCards(cards);
+      setLoading(false);
+    });
+
+    seedDebatesIfEmpty(user.uid).catch(() => {});
+
+    return unsub;
+  }, [user]);
 
   const openCardView = useCallback((card: DebateCard) => {
     setCardViewCard(card);
@@ -50,40 +67,44 @@ export function BrowsePage() {
     setCurrentView({ type: "dedicated", card });
   }, []);
 
-  const openCreate = useCallback(
-    (category: "trending" | "continue" | "recommended") => {
-      setCreateCategory(category);
-      setCreateOpen(true);
-    },
-    []
-  );
+  const openCreate = useCallback((category: DebateCategory) => {
+    setCreateCategory(category);
+    setCreateOpen(true);
+  }, []);
 
   const openExpanded = useCallback(
-    (title: string, category: "trending" | "continue" | "recommended") => {
+    (title: string, category: DebateCategory) => {
       setCurrentView({ type: "expanded", title, category });
     },
     []
   );
 
   const handleCreateSubmit = useCallback(
-    (data: DebateCardData) => {
-      const newCard = new DebateCard(data);
-      switch (data.category) {
-        case "trending":
-          setTrendingCards((prev) => [newCard, ...prev]);
-          break;
-        case "continue":
-          setContinueCards((prev) => [newCard, ...prev]);
-          break;
-        case "recommended":
-          setRecommendedCards((prev) => [newCard, ...prev]);
-          break;
+    async (data: DebateCardData) => {
+      if (!user) return;
+      setCreateSubmitting(true);
+      try {
+        await createDebate({
+          title: data.title,
+          description: data.description,
+          videoUrl: data.videoUrl,
+          sdgTags: data.sdgTags,
+          category: data.category,
+          creatorId: user.uid,
+        });
+        setCreateOpen(false);
+      } finally {
+        setCreateSubmitting(false);
       }
     },
-    []
+    [user]
   );
 
-  const getCardsByView = (category: "trending" | "continue" | "recommended") => {
+  const trendingCards = getCardsByCategory(allCards, "trending");
+  const continueCards = getCardsByCategory(allCards, "continue");
+  const recommendedCards = getCardsByCategory(allCards, "recommended");
+
+  const getCardsByView = (category: DebateCategory) => {
     switch (category) {
       case "trending":
         return trendingCards;
@@ -94,7 +115,6 @@ export function BrowsePage() {
     }
   };
 
-  // Render sub-views
   if (currentView.type === "dedicated") {
     return (
       <DedicatedTopicPage
@@ -113,6 +133,14 @@ export function BrowsePage() {
         onTapCard={openCardView}
         onTapTitle={openDedicated}
       />
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <p className="text-sm text-muted-foreground">Loading debates…</p>
+      </div>
     );
   }
 
@@ -140,7 +168,6 @@ export function BrowsePage() {
   return (
     <>
       <div className="flex flex-col gap-8 py-6">
-        {/* Welcome header */}
         <div className="px-4 lg:px-8">
           <h1 className="text-2xl font-bold text-foreground lg:text-3xl">
             Browse Debates
@@ -150,7 +177,6 @@ export function BrowsePage() {
           </p>
         </div>
 
-        {/* Sections */}
         {sections.map((section) => (
           <CardSection
             key={section.category}
@@ -166,7 +192,6 @@ export function BrowsePage() {
         ))}
       </div>
 
-      {/* Modals */}
       <CardViewModal
         card={cardViewCard}
         open={cardViewOpen}
@@ -177,6 +202,7 @@ export function BrowsePage() {
         onClose={() => setCreateOpen(false)}
         onSubmit={handleCreateSubmit}
         defaultCategory={createCategory}
+        submitting={createSubmitting}
       />
     </>
   );
