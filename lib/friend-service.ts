@@ -15,7 +15,7 @@ import { Friend, type FriendData } from "@/lib/models/friend";
 const FRIEND_CODES_COLLECTION = "friendCodes";
 
 function generateFriendCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXY23456789";
   let code = "DEBATE-";
   for (let i = 0; i < 6; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
