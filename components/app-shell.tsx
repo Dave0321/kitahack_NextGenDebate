@@ -45,11 +45,6 @@ export function AppShell({
   const [showFriends, setShowFriends] = useState(false);
   const CURRENT_USER = "DebateMe_User";
 
-  // If friends page is open, render it
-  if (showFriends) {
-    return <FriendsPage onBack={() => setShowFriends(false)} />;
-  }
-
   // Full-screen debate room — bypasses header/nav entirely
   if (debateChallenge) {
     return (
@@ -79,25 +74,37 @@ export function AppShell({
 
         {/* Desktop nav */}
         <nav className="ml-auto hidden items-center gap-1 md:flex">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
-                activeTab === tab.id
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <tab.icon className="h-4 w-4" />
-              {tab.label}
-            </button>
-          ))}
+          {tabs.map((tab) => {
+            let activeColor = "text-primary bg-primary/10"; // Default
+            if (tab.id === "browse") activeColor = "text-violet-500 bg-violet-500/10";
+            if (tab.id === "learning") activeColor = "text-emerald-500 bg-emerald-500/10";
+            if (tab.id === "profile") activeColor = "text-cyan-500 bg-cyan-500/10";
+
+            return (
+              <button
+                key={tab.id}
+                onClick={() => { setActiveTab(tab.id); setShowFriends(false); }}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+                  !showFriends && activeTab === tab.id
+                    ? activeColor
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                )}
+              >
+                <tab.icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            );
+          })}
           {/* Friends button - desktop */}
           <button
             onClick={() => setShowFriends(true)}
-            className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+              showFriends
+                ? "bg-rose-500/10 text-rose-500"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+            )}
             aria-label="Add friends"
           >
             <UserPlus className="h-4 w-4" />
@@ -109,24 +116,30 @@ export function AppShell({
         <div className="ml-auto flex items-center md:hidden">
           <button
             onClick={() => setShowFriends(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-secondary transition-colors"
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+              showFriends ? "bg-rose-500/10 text-rose-500" : "text-muted-foreground hover:bg-secondary"
+            )}
             aria-label="Add friends"
           >
-            <UserPlus className="h-5 w-5 text-muted-foreground" />
+            <UserPlus className={cn("h-5 w-5", showFriends ? "text-rose-500" : "text-muted-foreground")} />
           </button>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="flex-1 pb-20 md:pb-0">
-        <div className={activeTab === "browse" ? "block" : "hidden"}>
+        <div className={!showFriends && activeTab === "browse" ? "block" : "hidden"}>
           {browseContent}
         </div>
-        <div className={activeTab === "learning" ? "block" : "hidden"}>
+        <div className={!showFriends && activeTab === "learning" ? "block" : "hidden"}>
           {learningHubContent}
         </div>
-        <div className={activeTab === "profile" ? "block" : "hidden"}>
+        <div className={!showFriends && activeTab === "profile" ? "block" : "hidden"}>
           {profileContent}
+        </div>
+        <div className={showFriends ? "block" : "hidden"}>
+          <FriendsPage />
         </div>
       </main>
 
@@ -134,15 +147,20 @@ export function AppShell({
       <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t bg-card md:hidden">
         {tabs.map((tab) => {
           const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
+          const isActive = !showFriends && activeTab === tab.id;
+          let activeColorMobile = "text-primary"; // Default
+          if (tab.id === "browse") activeColorMobile = "text-violet-500";
+          if (tab.id === "learning") activeColorMobile = "text-emerald-500";
+          if (tab.id === "profile") activeColorMobile = "text-cyan-500";
+
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => { setActiveTab(tab.id); setShowFriends(false); }}
               className={cn(
                 "flex flex-1 flex-col items-center gap-1 py-2 text-xs font-medium transition-colors",
                 isActive
-                  ? "text-primary"
+                  ? activeColorMobile
                   : "text-muted-foreground"
               )}
               aria-label={tab.label}

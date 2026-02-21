@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { YoutubeChallenge } from "@/lib/models/youtube-challenge";
 import { YouTubePlayer } from "@/components/debate/youtube-player";
 import { Button } from "@/components/ui/button";
@@ -15,10 +16,13 @@ import {
     Clock,
     Zap,
     Radio,
-    Sparkles,
     MessageSquare,
-    TrendingUp,
     X,
+    ThumbsUp,
+    ThumbsDown,
+    Minus,
+    Vote,
+    Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,26 +35,13 @@ interface ChallengeDetailModalProps {
     onEnterRoom: (challenge: YoutubeChallenge) => void;
 }
 
-// Deterministic "AI analysis" derived from the challenge data
-function useAIInsights(challenge: YoutubeChallenge) {
+// Deterministic seed vote counts from challenge data
+function useVoteData(challenge: YoutubeChallenge) {
     const seed = challenge.topic.length + challenge.raisedBy.length;
-    const stances = [
-        { label: "Pro", pct: 45 + (seed % 20) },
-        { label: "Con", pct: 30 + (seed % 15) },
-    ];
-    stances[1].pct = Math.min(stances[1].pct, 100 - stances[0].pct - 5);
-    const neutral = 100 - stances[0].pct - stances[1].pct;
-
-    const keyPoints = [
-        "Economic implications are central to this debate.",
-        "Historical precedents show mixed outcomes.",
-        "Public opinion is closely divided on this topic.",
-    ].slice(0, 2 + (seed % 2));
-
-    const difficulty = ["Moderate", "High", "Very High"][(seed % 3)];
-    const engagement = ["Rising", "Trending", "Hot"][(seed % 3)];
-
-    return { stances, neutral, keyPoints, difficulty, engagement };
+    const basePro = 40 + (seed % 30);        // 40–69
+    const baseCon = 20 + ((seed * 3) % 25);  // 20–44
+    const baseNeutral = 100 - basePro - baseCon;
+    return { basePro, baseCon, baseNeutral: Math.max(5, baseNeutral) };
 }
 
 const STATUS_CFG = {
@@ -68,13 +59,26 @@ export function ChallengeDetailModal({
     onAccept,
     onEnterRoom,
 }: ChallengeDetailModalProps) {
+    const [userVote, setUserVote] = useState<"pro" | "neutral" | "con" | null>(null);
+
     if (!challenge) return null;
 
     const canEnter = challenge.status === "scheduled" || challenge.status === "live";
     const canAccept = !isOwn && challenge.status === "open";
     const cfg = STATUS_CFG[challenge.status];
     const StatusIcon = cfg.icon;
-    const ai = useAIInsights(challenge);
+
+    const { basePro, baseCon, baseNeutral } = useVoteData(challenge);
+
+    // Add user's vote to the totals
+    const proVotes = basePro + (userVote === "pro" ? 1 : 0);
+    const conVotes = baseCon + (userVote === "con" ? 1 : 0);
+    const neutralVotes = baseNeutral + (userVote === "neutral" ? 1 : 0);
+    const totalVotes = proVotes + conVotes + neutralVotes;
+
+    const proPct = Math.round((proVotes / totalVotes) * 100);
+    const conPct = Math.round((conVotes / totalVotes) * 100);
+    const neutralPct = 100 - proPct - conPct;
 
     return (
         <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -124,59 +128,99 @@ export function ChallengeDetailModal({
                         {/* ── Two-column body ───────────────────────────────────────── */}
                         <div className="grid grid-cols-5 gap-4 px-5 pb-5">
 
-                            {/* Left: AI Analysis (3 cols) */}
+                            {/* Left: Community Voting (3 cols) */}
                             <div className="col-span-3 flex flex-col gap-3">
                                 <div className="flex items-center gap-2">
-                                    <Sparkles className="h-3.5 w-3.5 text-violet-400" />
-                                    <span className="text-xs font-semibold text-violet-300 uppercase tracking-wide">AI Analysis</span>
+                                    <Vote className="h-3.5 w-3.5 text-violet-400" />
+                                    <span className="text-xs font-semibold text-violet-300 uppercase tracking-wide">Community Vote</span>
+                                    {userVote && (
+                                        <span className="text-[10px] text-white/30">· Your vote recorded</span>
+                                    )}
                                 </div>
 
-                                {/* Stance distribution */}
+                                {/* Vote buttons */}
+                                {!userVote ? (
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <button
+                                            onClick={() => setUserVote("pro")}
+                                            className="flex flex-col items-center gap-1.5 rounded-xl border border-violet-500/20 bg-violet-500/8 px-2 py-3 text-violet-300 hover:bg-violet-500/15 hover:border-violet-500/40 transition-all active:scale-95"
+                                        >
+                                            <ThumbsUp className="h-5 w-5" />
+                                            <span className="text-[11px] font-bold">PRO</span>
+                                        </button>
+                                        <button
+                                            onClick={() => setUserVote("neutral")}
+                                            className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-500/20 bg-slate-500/8 px-2 py-3 text-slate-300 hover:bg-slate-500/15 hover:border-slate-500/40 transition-all active:scale-95"
+                                        >
+                                            <Minus className="h-5 w-5" />
+                                            <span className="text-[11px] font-bold">Neutral</span>
+                                        </button>
+                                        <button
+                                            onClick={() => setUserVote("con")}
+                                            className="flex flex-col items-center gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/8 px-2 py-3 text-rose-300 hover:bg-rose-500/15 hover:border-rose-500/40 transition-all active:scale-95"
+                                        >
+                                            <ThumbsDown className="h-5 w-5" />
+                                            <span className="text-[11px] font-bold">CON</span>
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="rounded-xl bg-white/5 border border-white/8 px-3 py-2.5 flex items-center gap-2">
+                                        {userVote === "pro" && <ThumbsUp className="h-4 w-4 text-violet-400" />}
+                                        {userVote === "neutral" && <Minus className="h-4 w-4 text-slate-400" />}
+                                        {userVote === "con" && <ThumbsDown className="h-4 w-4 text-rose-400" />}
+                                        <span className="text-xs text-white/60">
+                                            You voted <span className={cn("font-bold",
+                                                userVote === "pro" ? "text-violet-300" : userVote === "con" ? "text-rose-300" : "text-slate-300"
+                                            )}>{userVote.toUpperCase()}</span>
+                                        </span>
+                                        <button onClick={() => setUserVote(null)} className="ml-auto text-[10px] text-white/30 hover:text-white/60 transition-colors">
+                                            Change
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Vote distribution bar */}
                                 <div className="rounded-xl bg-white/5 border border-white/8 p-3 flex flex-col gap-2">
-                                    <p className="text-[11px] font-medium text-white/50 uppercase tracking-wide">Stance Split</p>
-                                    <div className="flex h-2 w-full overflow-hidden rounded-full gap-0.5">
-                                        <div className="bg-violet-500 rounded-l-full transition-all" style={{ width: `${ai.stances[0].pct}%` }} />
-                                        <div className="bg-slate-600 transition-all" style={{ width: `${ai.neutral}%` }} />
-                                        <div className="bg-rose-500 rounded-r-full transition-all" style={{ width: `${ai.stances[1].pct}%` }} />
+                                    <p className="text-[11px] font-medium text-white/50 uppercase tracking-wide">Vote Distribution</p>
+                                    <div className="flex h-2.5 w-full overflow-hidden rounded-full gap-0.5">
+                                        <div
+                                            className="bg-violet-500 rounded-l-full transition-all duration-500"
+                                            style={{ width: `${proPct}%` }}
+                                        />
+                                        <div
+                                            className="bg-slate-500 transition-all duration-500"
+                                            style={{ width: `${neutralPct}%` }}
+                                        />
+                                        <div
+                                            className="bg-rose-500 rounded-r-full transition-all duration-500"
+                                            style={{ width: `${conPct}%` }}
+                                        />
                                     </div>
-                                    <div className="flex justify-between text-[10px] text-white/50">
-                                        <span className="text-violet-400">Pro {ai.stances[0].pct}%</span>
-                                        <span>Neutral {ai.neutral}%</span>
-                                        <span className="text-rose-400">Con {ai.stances[1].pct}%</span>
+                                    <div className="flex justify-between text-[10px]">
+                                        <span className="text-violet-400 font-semibold">PRO {proPct}%</span>
+                                        <span className="text-slate-400">Neutral {neutralPct}%</span>
+                                        <span className="text-rose-400 font-semibold">CON {conPct}%</span>
                                     </div>
+                                    <p className="text-[10px] text-white/25 text-center">{totalVotes} votes cast</p>
                                 </div>
 
-                                {/* Key points */}
+                                {/* Key discussion points */}
                                 <div className="rounded-xl bg-white/5 border border-white/8 p-3 flex flex-col gap-2">
                                     <p className="text-[11px] font-medium text-white/50 uppercase tracking-wide flex items-center gap-1.5">
                                         <MessageSquare className="h-3 w-3" /> Key Discussion Points
                                     </p>
                                     <ul className="flex flex-col gap-1.5">
-                                        {ai.keyPoints.map((pt, i) => (
+                                        {[
+                                            "Economic implications are central to this debate.",
+                                            "Public opinion is closely divided on this topic.",
+                                            "Historical precedents show mixed outcomes.",
+                                        ].map((pt, i) => (
                                             <li key={i} className="flex items-start gap-2 text-xs text-white/70">
                                                 <span className="mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-violet-400" />
                                                 {pt}
                                             </li>
                                         ))}
                                     </ul>
-                                </div>
-
-                                {/* Metrics row */}
-                                <div className="flex gap-2">
-                                    <div className="flex-1 rounded-xl bg-white/5 border border-white/8 px-3 py-2 flex items-center gap-2">
-                                        <TrendingUp className="h-3.5 w-3.5 text-amber-400" />
-                                        <div>
-                                            <p className="text-[10px] text-white/40">Engagement</p>
-                                            <p className="text-xs font-semibold text-amber-300">{ai.engagement}</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex-1 rounded-xl bg-white/5 border border-white/8 px-3 py-2 flex items-center gap-2">
-                                        <Swords className="h-3.5 w-3.5 text-sky-400" />
-                                        <div>
-                                            <p className="text-[10px] text-white/40">Difficulty</p>
-                                            <p className="text-xs font-semibold text-sky-300">{ai.difficulty}</p>
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
 
@@ -252,10 +296,11 @@ export function ChallengeDetailModal({
                                     {canEnter && (
                                         <Button
                                             onClick={() => onEnterRoom(challenge)}
-                                            className="w-full bg-gradient-to-r from-rose-600 to-orange-500 hover:from-rose-500 hover:to-orange-400 text-white border-0 shadow-lg shadow-rose-500/20 font-semibold"
+                                            size="sm"
+                                            className="w-full bg-gradient-to-r from-rose-600 to-orange-500 hover:from-rose-500 hover:to-orange-400 text-white border-0 shadow-lg shadow-rose-500/20 font-semibold text-[11px] px-1"
                                         >
-                                            <Radio className="h-4 w-4 mr-2" />
-                                            Enter Debate Room
+                                            <Eye className="h-3 w-3 mr-1 shrink-0" />
+                                            <span className="truncate">Enter Room · Watch Live</span>
                                         </Button>
                                     )}
 

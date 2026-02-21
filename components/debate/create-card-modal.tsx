@@ -35,6 +35,45 @@ export function CreateCardModal({
   const [description, setDescription] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [selectedSdgs, setSelectedSdgs] = useState<number[]>([]);
+  const [file, setFile] = useState<File | null>(null);
+
+  const handleSubmit = () => {
+    const hasContent = title.trim() || videoUrl.trim() || file;
+    if (!hasContent || !description.trim() || selectedSdgs.length === 0)
+      return;
+
+    const finalTitle = title.trim()
+      ? title.trim()
+      : file
+        ? file.name.split('.')[0]
+        : videoUrl.trim()
+          ? "Video Challenge"
+          : "New Challenge";
+
+    const newCard: DebateCardData = {
+      id: `debate-${Date.now()}`,
+      title: finalTitle,
+      description: description.trim(),
+      videoUrl: videoUrl.trim() || undefined,
+      fileUrl: file ? URL.createObjectURL(file) : undefined,
+      fileName: file ? file.name : undefined,
+      fileType: file ? (file.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'mp4') : undefined,
+      sdgTags: selectedSdgs,
+      category: defaultCategory,
+      createdAt: new Date().toISOString().split("T")[0],
+    };
+
+    onSubmit(newCard);
+    setTitle("");
+    setDescription("");
+    setVideoUrl("");
+    setFile(null);
+    setSelectedSdgs([]);
+    onClose();
+  };
+
+  const hasContent = title.trim().length > 0 || videoUrl.trim().length > 0 || file !== null;
+  const isValid = hasContent && description.trim().length > 0 && selectedSdgs.length > 0;
 
   const toggleSdg = (id: number) => {
     setSelectedSdgs((prev) => {
@@ -45,33 +84,6 @@ export function CreateCardModal({
       return [...prev, id];
     });
   };
-
-  const handleSubmit = () => {
-    if (!title.trim() || !description.trim() || selectedSdgs.length === 0)
-      return;
-
-    const newCard: DebateCardData = {
-      id: `debate-${Date.now()}`,
-      title: title.trim(),
-      description: description.trim(),
-      videoUrl: videoUrl.trim() || undefined,
-      sdgTags: selectedSdgs,
-      category: defaultCategory,
-      createdAt: new Date().toISOString().split("T")[0],
-    };
-
-    onSubmit(newCard);
-    setTitle("");
-    setDescription("");
-    setVideoUrl("");
-    setSelectedSdgs([]);
-    onClose();
-  };
-
-  const isValid =
-    title.trim().length > 0 &&
-    description.trim().length > 0 &&
-    selectedSdgs.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -86,7 +98,7 @@ export function CreateCardModal({
         <div className="flex flex-col gap-4">
           {/* Topic Name */}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="topic-name">Topic Name</Label>
+            <Label htmlFor="topic-name">Topic Name <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <Input
               id="topic-name"
               placeholder="Enter the debate topic name"
@@ -107,20 +119,48 @@ export function CreateCardModal({
             />
           </div>
 
-          {/* YouTube Video Link */}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="video-url">
-              YouTube Video Link{" "}
-              <span className="text-muted-foreground font-normal">
-                (optional)
-              </span>
-            </Label>
-            <Input
-              id="video-url"
-              placeholder="https://youtube.com/watch?v=..."
-              value={videoUrl}
-              onChange={(e) => setVideoUrl(e.target.value)}
-            />
+          {/* Main Content Options */}
+          <div className="flex flex-col gap-3 rounded-lg border border-border p-3 bg-secondary/10">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase">Content Provider (Provide at least one)</Label>
+
+            {/* YouTube Video Link */}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="video-url" className="text-sm">
+                YouTube Video Link
+              </Label>
+              <Input
+                id="video-url"
+                placeholder="https://youtube.com/watch?v=..."
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="h-px w-full bg-border" />
+              <span className="text-xs text-muted-foreground font-medium uppercase">OR</span>
+              <div className="h-px w-full bg-border" />
+            </div>
+
+            {/* File Upload */}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="file-upload" className="text-sm">
+                Upload File <span className="text-muted-foreground font-normal">(MP4 or PDF)</span>
+              </Label>
+              <Input
+                id="file-upload"
+                type="file"
+                accept=".mp4,.pdf"
+                className="cursor-pointer file:cursor-pointer file:bg-primary/20 file:text-primary file:border-0 file:rounded-md file:mr-3 hover:file:bg-primary/30"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    setFile(e.target.files[0]);
+                  } else {
+                    setFile(null);
+                  }
+                }}
+              />
+            </div>
           </div>
 
           {/* SDG Tags */}
@@ -150,9 +190,8 @@ export function CreateCardModal({
                     style={
                       isSelected
                         ? {
-                            backgroundColor: sdg.color,
-                            ringColor: sdg.color,
-                          }
+                          backgroundColor: sdg.color,
+                        }
                         : undefined
                     }
                   >

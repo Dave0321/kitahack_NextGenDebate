@@ -1,394 +1,427 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import { getAllFriends, type Friend } from "@/lib/models/friend";
-import { getSDGsByIds } from "@/lib/data/sdg-data";
-import { cn } from "@/lib/utils";
-import {
-  ArrowLeft,
-  QrCode,
-  Users,
-  User,
   Search,
-  Trophy,
+  UserPlus,
+  Users,
+  Clock,
   Swords,
+  Check,
   X,
-  Copy,
-  Share2,
+  MessageSquare,
+  ChevronRight,
+  User
 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
-interface FriendsPageProps {
-  onBack: () => void;
+// ── Types & Mock Data ────────────────────────────────────────────────────────
+type FriendStatus = "online" | "offline" | "in_debate";
+
+interface UserProfile {
+  id: string;
+  name: string;
+  username: string;
+  avatar: string;
+  status: FriendStatus;
+  mutualFriends: number;
 }
 
-type FriendsView = "list" | "qr";
+const MOCK_FRIENDS: UserProfile[] = [
+  {
+    id: "f1",
+    name: "Alex Rahman",
+    username: "@alexr",
+    avatar: "https://i.pravatar.cc/150?u=alex",
+    status: "online",
+    mutualFriends: 12,
+  },
+  {
+    id: "f2",
+    name: "Sarah Chen",
+    username: "@sarah.c",
+    avatar: "https://i.pravatar.cc/150?u=sarah",
+    status: "in_debate",
+    mutualFriends: 5,
+  },
+  {
+    id: "f3",
+    name: "James Wilson",
+    username: "@jwilson",
+    avatar: "https://i.pravatar.cc/150?u=james",
+    status: "offline",
+    mutualFriends: 3,
+  },
+  {
+    id: "f4",
+    name: "Emma Davis",
+    username: "@emma_d",
+    avatar: "https://i.pravatar.cc/150?u=emma",
+    status: "online",
+    mutualFriends: 8,
+  }
+];
 
-export function FriendsPage({ onBack }: FriendsPageProps) {
-  const [view, setView] = useState<FriendsView>("list");
+const MOCK_REQUESTS: UserProfile[] = [
+  {
+    id: "r1",
+    name: "Michael Chang",
+    username: "@mchang22",
+    avatar: "https://i.pravatar.cc/150?u=michael",
+    status: "online",
+    mutualFriends: 2,
+  },
+  {
+    id: "r2",
+    name: "Linda Smith",
+    username: "@linda.s",
+    avatar: "https://i.pravatar.cc/150?u=linda",
+    status: "offline",
+    mutualFriends: 0,
+  }
+];
+
+// ── Friends Page Component ───────────────────────────────────────────────────
+export function FriendsPage() {
+  const [activeTab, setActiveTab] = useState<"all" | "online" | "requests">("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
-  const [profileOpen, setProfileOpen] = useState(false);
 
-  const friends = getAllFriends();
+  const [friends, setFriends] = useState<UserProfile[]>(MOCK_FRIENDS);
+  const [requests, setRequests] = useState<UserProfile[]>(MOCK_REQUESTS);
 
-  const filteredFriends = useMemo(() => {
-    if (!searchQuery.trim()) return friends;
-    return friends.filter((f) =>
-      f.nickname.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [friends, searchQuery]);
-
-  const openProfile = (friend: Friend) => {
-    setSelectedFriend(friend);
-    setProfileOpen(true);
+  // ── Handlers
+  const handleAcceptRequest = (id: string) => {
+    const user = requests.find((r) => r.id === id);
+    if (user) {
+      setRequests((prev) => prev.filter((r) => r.id !== id));
+      setFriends((prev) => [user, ...prev]);
+    }
   };
 
+  const handleDeclineRequest = (id: string) => {
+    setRequests((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const handleRemoveFriend = (id: string) => {
+    if (window.confirm("Are you sure you want to remove this friend?")) {
+      setFriends((prev) => prev.filter((f) => f.id !== id));
+    }
+  };
+
+  const handleInviteToDebate = (user: UserProfile) => {
+    alert(`Invite sent to ${user.name} for a debate!`);
+  };
+
+  // ── Derived State
+  const filteredFriends = useMemo(() => {
+    let list = friends;
+    if (activeTab === "online") {
+      list = list.filter((f) => f.status === "online" || f.status === "in_debate");
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (f) =>
+          f.name.toLowerCase().includes(q) || f.username.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [friends, activeTab, searchQuery]);
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-card px-4 lg:px-8">
-        <button
-          onClick={onBack}
-          className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-secondary transition-colors"
-          aria-label="Go back"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <h1 className="text-base font-bold text-foreground">Friends</h1>
-        <div className="ml-auto flex items-center gap-1">
-          <button
-            onClick={() => setView("list")}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-              view === "list"
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-secondary"
-            )}
-            aria-label="Friend list"
-          >
-            <Users className="h-4.5 w-4.5" />
-          </button>
-          <button
-            onClick={() => setView("qr")}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-              view === "qr"
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-secondary"
-            )}
-            aria-label="QR code"
-          >
-            <QrCode className="h-4.5 w-4.5" />
-          </button>
+    <div className="flex min-h-[calc(100vh-3.5rem)] flex-col bg-background pb-20">
+
+      {/* ── Modern Hero Section ─────────────────────────────────────────────── */}
+      <div className="px-4 pt-8 pb-4 lg:px-10 max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Main Welcome Box */}
+          <div className="md:col-span-2 relative rounded-[2rem] overflow-hidden bg-gradient-to-br from-[#1a0f0a] via-[#111827] to-[#1a0f15] border border-white/5 p-8 md:p-12 flex flex-col justify-center group shadow-xl">
+            {/* Background elements */}
+            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-[0.03] mix-blend-overlay" />
+            <div className="absolute top-0 right-0 w-64 h-64 bg-rose-600/10 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2 pointer-events-none transition-transform duration-700 group-hover:scale-110" />
+            <div className="absolute bottom-0 left-0 w-64 h-64 bg-amber-600/10 rounded-full blur-[80px] translate-y-1/2 -translate-x-1/2 pointer-events-none transition-transform duration-700 group-hover:scale-110" />
+
+            <div className="relative z-10 w-full flex items-center justify-between mb-6">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 shadow-sm backdrop-blur-sm">
+                <Users className="h-4 w-4 text-amber-500" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-amber-500">Global Network</span>
+              </div>
+            </div>
+
+            <h1 className="relative z-10 text-4xl lg:text-5xl font-black text-white mb-4 leading-tight tracking-tight drop-shadow-sm">
+              Your <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-rose-400 inline-block drop-shadow-sm">Inner Circle</span>
+            </h1>
+            <p className="relative z-10 text-base text-white/70 max-w-md font-medium leading-relaxed">
+              Grow your network of critical thinkers. Challenge friends to private matches, track your mutual progress, and build your debate team.
+            </p>
+          </div>
+
+          {/* Quick Action / Expand Network Box */}
+          <div className="relative rounded-[2rem] overflow-hidden bg-[#111827] border border-white/5 p-8 flex flex-col justify-between group cursor-pointer hover:border-rose-500/30 transition-all hover:bg-[#1a0f15] shadow-xl">
+            <div className="flex justify-between items-start mb-8">
+              <div className="flex h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-500 to-rose-500 items-center justify-center text-white shadow-lg shadow-rose-500/20 group-hover:scale-110 group-hover:-rotate-3 transition-transform duration-300 relative z-10">
+                <UserPlus className="h-7 w-7" />
+              </div>
+              <div className="flex -space-x-3 pointer-events-none">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="w-10 h-10 rounded-full bg-slate-800 border-2 border-[#111827] flex items-center justify-center shadow-md relative z-0">
+                    <User className="h-4 w-4 text-slate-400" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="relative z-10 mt-auto">
+              <h3 className="text-xl font-black text-white mb-1.5 group-hover:text-rose-300 transition-colors tracking-tight">Expand Network</h3>
+              <p className="text-sm text-white/60 font-medium leading-relaxed">Discover debaters with similar interests and skill levels.</p>
+            </div>
+
+            {/* Action Arrow (implied) */}
+            <div className="absolute bottom-8 right-8 w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center opacity-0 group-hover:opacity-100 group-hover:bg-rose-500 group-hover:border-rose-400 text-white transition-all shadow-md transform translate-x-4 group-hover:translate-x-0">
+              <ChevronRight className="h-5 w-5" />
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="mx-auto max-w-lg px-4 py-4 lg:px-8">
-        {view === "qr" ? (
-          <QRCodeView />
-        ) : (
-          <>
-            {/* Search */}
-            <div className="relative mb-4">
+      <div className="mx-auto w-full max-w-5xl px-4 py-8 lg:px-10">
+
+        {/* ── Search & Filter Bar ───────────────────────────────────── */}
+        <div className="mb-8 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+
+          {/* Tabs */}
+          <div className="flex bg-foreground/5 p-1 rounded-xl w-full sm:w-auto overflow-x-auto hide-scrollbar">
+            <TabButton
+              active={activeTab === "all"}
+              onClick={() => setActiveTab("all")}
+              label="All Friends"
+              count={friends.length}
+            />
+            <TabButton
+              active={activeTab === "online"}
+              onClick={() => setActiveTab("online")}
+              label="Online"
+              indicator
+            />
+            <TabButton
+              active={activeTab === "requests"}
+              onClick={() => setActiveTab("requests")}
+              label="Requests"
+              count={requests.length > 0 ? requests.length : undefined}
+              alert={requests.length > 0}
+            />
+          </div>
+
+          {/* Search */}
+          {activeTab !== "requests" && (
+            <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Search friends..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-10"
+                className="pl-9 rounded-xl bg-card border-border/50 focus-visible:ring-sky-500/50 shadow-sm"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label="Clear search"
                 >
                   <X className="h-4 w-4" />
                 </button>
               )}
             </div>
+          )}
+        </div>
 
-            {/* Friend count */}
-            <p className="mb-3 text-xs text-muted-foreground">
-              {filteredFriends.length} friend
-              {filteredFriends.length !== 1 ? "s" : ""}
-            </p>
+        {/* ── Content Area ──────────────────────────────────────────── */}
+        <div className="space-y-4">
 
-            {/* Friend list */}
-            <div className="flex flex-col gap-2">
-              {filteredFriends.map((friend) => (
-                <button
-                  key={friend.id}
-                  onClick={() => openProfile(friend)}
-                  className="flex items-center gap-3 rounded-xl border bg-card p-3 text-left transition-colors hover:bg-secondary/50"
-                >
-                  <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-primary/10">
-                    <User className="h-5 w-5 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">
-                      {friend.getDisplayName()}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {friend.getBioPreview()}
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                    <span className="text-xs font-medium text-foreground">
-                      {friend.getWinRate()} WR
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {friend.debatesCount} debates
-                    </span>
-                  </div>
-                </button>
-              ))}
-
-              {filteredFriends.length === 0 && (
-                <div className="rounded-xl border bg-card p-8 text-center">
-                  <Users className="h-8 w-8 mx-auto mb-2 text-muted-foreground/40" />
-                  <p className="text-sm text-muted-foreground">
-                    {searchQuery
-                      ? "No friends match your search."
-                      : "No friends yet. Share your QR code to add friends!"}
-                  </p>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Friend Profile Modal */}
-      <FriendProfileModal
-        friend={selectedFriend}
-        open={profileOpen}
-        onClose={() => setProfileOpen(false)}
-      />
-    </div>
-  );
-}
-
-// --- QR Code View ---
-
-function QRCodeView() {
-  const [copied, setCopied] = useState(false);
-  const friendCode = "DEBATE-" + Math.random().toString(36).substring(2, 8).toUpperCase();
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(friendCode).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="flex flex-col items-center gap-6 py-4">
-      <div className="text-center">
-        <h2 className="text-lg font-bold text-foreground">Your QR Code</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Let others scan this code to add you as a friend.
-        </p>
-      </div>
-
-      {/* QR Code placeholder */}
-      <div className="flex flex-col items-center gap-4 rounded-2xl border bg-card p-6">
-        <div className="flex h-52 w-52 items-center justify-center rounded-xl bg-foreground p-4">
-          {/* SVG QR pattern */}
-          <svg viewBox="0 0 200 200" className="h-full w-full">
-            <rect width="200" height="200" fill="white" />
-            {/* Top-left position pattern */}
-            <rect x="10" y="10" width="50" height="50" fill="black" />
-            <rect x="15" y="15" width="40" height="40" fill="white" />
-            <rect x="20" y="20" width="30" height="30" fill="black" />
-            {/* Top-right position pattern */}
-            <rect x="140" y="10" width="50" height="50" fill="black" />
-            <rect x="145" y="15" width="40" height="40" fill="white" />
-            <rect x="150" y="20" width="30" height="30" fill="black" />
-            {/* Bottom-left position pattern */}
-            <rect x="10" y="140" width="50" height="50" fill="black" />
-            <rect x="15" y="145" width="40" height="40" fill="white" />
-            <rect x="20" y="150" width="30" height="30" fill="black" />
-            {/* Data modules - pseudo random pattern */}
-            {Array.from({ length: 15 }, (_, row) =>
-              Array.from({ length: 15 }, (_, col) => {
-                const x = 70 + col * 8;
-                const y = 10 + row * 8;
-                const show = (row * 7 + col * 11 + row * col) % 3 !== 0;
-                if (x > 130 && y < 65) return null;
-                if (x < 65 && y > 130) return null;
-                if (x < 65 && y < 65) return null;
-                return show ? (
-                  <rect
-                    key={`${row}-${col}`}
-                    x={x}
-                    y={y}
-                    width="6"
-                    height="6"
-                    fill="black"
+          {activeTab === "requests" ? (
+            /* Requests View */
+            requests.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {requests.map((req) => (
+                  <RequestCard
+                    key={req.id}
+                    user={req}
+                    onAccept={() => handleAcceptRequest(req.id)}
+                    onDecline={() => handleDeclineRequest(req.id)}
                   />
-                ) : null;
-              })
-            )}
-            {/* Some extra random modules */}
-            <rect x="10" y="70" width="6" height="6" fill="black" />
-            <rect x="10" y="86" width="6" height="6" fill="black" />
-            <rect x="18" y="78" width="6" height="6" fill="black" />
-            <rect x="26" y="70" width="6" height="6" fill="black" />
-            <rect x="34" y="86" width="6" height="6" fill="black" />
-            <rect x="42" y="70" width="6" height="6" fill="black" />
-            <rect x="50" y="78" width="6" height="6" fill="black" />
-            <rect x="70" y="140" width="6" height="6" fill="black" />
-            <rect x="86" y="148" width="6" height="6" fill="black" />
-            <rect x="94" y="140" width="6" height="6" fill="black" />
-            <rect x="110" y="156" width="6" height="6" fill="black" />
-            <rect x="118" y="148" width="6" height="6" fill="black" />
-            <rect x="126" y="164" width="6" height="6" fill="black" />
-          </svg>
-        </div>
-
-        {/* Friend code */}
-        <div className="flex items-center gap-2 rounded-lg bg-secondary px-4 py-2">
-          <span className="text-sm font-mono font-semibold text-foreground">
-            {friendCode}
-          </span>
-          <button
-            onClick={handleCopy}
-            className="text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Copy friend code"
-          >
-            {copied ? (
-              <span className="text-xs text-primary font-medium">Copied</span>
-            ) : (
-              <Copy className="h-4 w-4" />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Share button */}
-      <Button variant="outline" className="w-full max-w-xs">
-        <Share2 className="h-4 w-4" />
-        Share Invite Link
-      </Button>
-    </div>
-  );
-}
-
-// --- Friend Profile Modal ---
-
-function FriendProfileModal({
-  friend,
-  open,
-  onClose,
-}: {
-  friend: Friend | null;
-  open: boolean;
-  onClose: () => void;
-}) {
-  if (!friend) return null;
-
-  const sdgs = getSDGsByIds(friend.interestedSdgs);
-
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="sr-only">
-            {friend.getDisplayName()} Profile
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            Profile details for {friend.getDisplayName()}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col items-center gap-4">
-          {/* Avatar */}
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/20">
-            <User className="h-10 w-10 text-primary" />
-          </div>
-
-          {/* Name & Bio */}
-          <div className="text-center">
-            <h3 className="text-lg font-bold text-foreground">
-              {friend.getDisplayName()}
-            </h3>
-            <p className="mt-1 text-sm text-muted-foreground">{friend.bio}</p>
-          </div>
-
-          {/* Stats */}
-          <div className="grid w-full grid-cols-3 gap-3 rounded-xl bg-secondary/50 p-4">
-            <div className="flex flex-col items-center gap-1">
-              <Swords className="h-4 w-4 text-muted-foreground" />
-              <span className="text-base font-bold text-foreground">
-                {friend.debatesCount}
-              </span>
-              <span className="text-[10px] text-muted-foreground">
-                Debates
-              </span>
-            </div>
-            <div className="flex flex-col items-center gap-1">
-              <Trophy className="h-4 w-4 text-muted-foreground" />
-              <span className="text-base font-bold text-foreground">
-                {friend.winsCount}
-              </span>
-              <span className="text-[10px] text-muted-foreground">Wins</span>
-            </div>
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-xs font-medium text-muted-foreground">
-                WR
-              </span>
-              <span className="text-base font-bold text-foreground">
-                {friend.getWinRate()}
-              </span>
-              <span className="text-[10px] text-muted-foreground">
-                Win Rate
-              </span>
-            </div>
-          </div>
-
-          {/* Interested SDGs */}
-          {sdgs.length > 0 && (
-            <div className="w-full">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">
-                Interested Topics
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {sdgs.map((sdg) => (
-                  <span
-                    key={sdg.id}
-                    className="rounded-lg px-2.5 py-1 text-xs font-semibold text-white"
-                    style={{ backgroundColor: sdg.color }}
-                  >
-                    SDG {sdg.id}: {sdg.shortName}
-                  </span>
                 ))}
               </div>
-            </div>
+            ) : (
+              <EmptyState
+                icon={Clock}
+                title="No pending requests"
+                subtitle="You're all caught up! Check back later for new friend requests."
+              />
+            )
+          ) : (
+            /* Friends View (All or Online) */
+            filteredFriends.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredFriends.map((friend) => (
+                  <FriendCard
+                    key={friend.id}
+                    user={friend}
+                    onRemove={() => handleRemoveFriend(friend.id)}
+                    onInvite={() => handleInviteToDebate(friend)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                icon={Users}
+                title={activeTab === "online" ? "No friends online" : "No friends found"}
+                subtitle={
+                  activeTab === "online"
+                    ? "None of your friends are currently online."
+                    : searchQuery
+                      ? "Try adjusting your search terms."
+                      : "Add some friends to start debating!"
+                }
+              />
+            )
           )}
-
-          {/* Added date */}
-          <p className="text-xs text-muted-foreground">
-            Friends since{" "}
-            {new Date(friend.addedAt).toLocaleDateString("en-US", {
-              month: "long",
-              year: "numeric",
-            })}
-          </p>
-
-          <Button variant="outline" className="w-full" onClick={onClose}>
-            Close
-          </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+
+      </div>
+    </div >
+  );
+}
+
+// ── Components ───────────────────────────────────────────────────────────────
+
+function TabButton({
+  active,
+  onClick,
+  label,
+  count,
+  indicator,
+  alert
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count?: number;
+  indicator?: boolean;
+  alert?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "relative flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all whitespace-nowrap",
+        active
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground hover:bg-foreground/5"
+      )}
+    >
+      {indicator && (
+        <span className="flex h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+      )}
+      {label}
+      {count !== undefined && (
+        <span className={cn(
+          "ml-1 flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold",
+          (alert || active) ? "bg-primary text-primary-foreground" : "bg-foreground/10 text-foreground"
+        )}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function FriendCard({ user, onRemove, onInvite }: { user: UserProfile; onRemove: () => void; onInvite: () => void; }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-border bg-card p-4 shadow-sm hover:border-border/80 transition-colors group">
+      <div className="flex items-center gap-3 overflow-hidden">
+        <div className="relative flex-shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={user.avatar} alt={user.name} className="h-12 w-12 rounded-full object-cover ring-2 ring-background" />
+          <StatusIndicator status={user.status} />
+        </div>
+        <div className="flex flex-col truncate">
+          <span className="truncate font-bold text-foreground">{user.name}</span>
+          <span className="truncate text-xs text-muted-foreground">{user.username} · {user.mutualFriends} mutual friends</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <button
+          onClick={onInvite}
+          className="flex items-center justify-center gap-1.5 rounded-full bg-sky-500/10 px-3 py-1.5 text-xs font-bold text-sky-600 transition-colors hover:bg-sky-500/20 dark:text-sky-400"
+        >
+          <Swords className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Debate</span>
+        </button>
+        <button className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/5 hover:text-foreground transition-colors">
+          <MessageSquare className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RequestCard({ user, onAccept, onDecline }: { user: UserProfile; onAccept: () => void; onDecline: () => void; }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4 shadow-sm">
+      <div className="flex items-center gap-3 overflow-hidden">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={user.avatar} alt={user.name} className="h-12 w-12 flex-shrink-0 rounded-full object-cover" />
+        <div className="flex flex-col truncate">
+          <span className="truncate font-bold text-foreground">{user.name}</span>
+          <span className="truncate text-xs text-muted-foreground">{user.username} · {user.mutualFriends} mutuals</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <button
+          onClick={onDecline}
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground/5 text-muted-foreground transition-colors hover:bg-rose-500/10 hover:text-rose-600"
+          aria-label="Decline"
+        >
+          <X className="h-4 w-4" />
+        </button>
+        <button
+          onClick={onAccept}
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-500 text-white transition-colors hover:bg-sky-600 shadow-sm shadow-sky-500/20"
+          aria-label="Accept"
+        >
+          <Check className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StatusIndicator({ status }: { status: FriendStatus }) {
+  return (
+    <div
+      className={cn(
+        "absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-background",
+        status === "online" && "bg-emerald-500",
+        status === "offline" && "bg-slate-300 dark:bg-slate-600",
+        status === "in_debate" && "bg-rose-500 flex items-center justify-center"
+      )}
+      title={status.replace("_", " ")}
+    >
+      {status === "in_debate" && <Swords className="h-2 w-2 text-white" />}
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon, title, subtitle }: { icon: any, title: string, subtitle: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 p-12 text-center">
+      <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-foreground/5 text-muted-foreground/50">
+        <Icon className="h-8 w-8" />
+      </div>
+      <h3 className="text-lg font-bold text-foreground">{title}</h3>
+      <p className="mt-1 text-sm text-muted-foreground max-w-sm">{subtitle}</p>
+    </div>
   );
 }

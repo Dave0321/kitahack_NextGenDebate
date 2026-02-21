@@ -6,6 +6,9 @@ export interface DebateCardData {
   title: string;
   description: string;
   videoUrl?: string;
+  fileUrl?: string;
+  fileType?: "mp4" | "pdf";
+  fileName?: string;
   sdgTags: number[]; // SDG IDs (max 2)
   thumbnailUrl?: string;
   category: "trending" | "continue" | "recommended";
@@ -17,6 +20,9 @@ export class DebateCard implements DebateCardData {
   title: string;
   description: string;
   videoUrl?: string;
+  fileUrl?: string;
+  fileType?: "mp4" | "pdf";
+  fileName?: string;
   sdgTags: number[];
   thumbnailUrl?: string;
   category: "trending" | "continue" | "recommended";
@@ -30,6 +36,9 @@ export class DebateCard implements DebateCardData {
     this.title = data.title;
     this.description = data.description;
     this.videoUrl = data.videoUrl;
+    this.fileUrl = data.fileUrl;
+    this.fileType = data.fileType;
+    this.fileName = data.fileName;
     this.sdgTags = data.sdgTags;
     this.thumbnailUrl = data.thumbnailUrl;
     this.category = data.category;

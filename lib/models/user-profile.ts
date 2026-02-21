@@ -86,7 +86,7 @@ export function createDefaultProfile(): UserProfile {
     nickname: "DebateEnthusiast",
     bio: "Passionate about critical thinking and sustainable development. Let's debate!",
     reasonForUsing: "Improve my debating skills",
-    interestedSdgs: [4, 13],
+    interestedSdgs: [4, 10, 13],
     isProfileComplete: true,
     createdAt: "2026-01-01",
   });
