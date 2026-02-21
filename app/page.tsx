@@ -12,6 +12,7 @@ import {
   createBlankProfile,
   type UserProfileData,
 } from "@/lib/models/user-profile";
+import type { YoutubeChallenge } from "@/lib/models/youtube-challenge";
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -19,6 +20,8 @@ export default function Home() {
     createBlankProfile()
   );
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [debateChallenge, setDebateChallenge] = useState<YoutubeChallenge | null>(null);
+  const [debateUserRole, setDebateUserRole] = useState<"pro" | "con" | null>(null);
 
   const handleLogin = () => {
     setIsAuthenticated(true);
@@ -51,12 +54,15 @@ export default function Home() {
         <ProfileSetup onComplete={handleOnboardingComplete} />
       )}
       <AppShell
-        browseContent={<BrowsePage />}
+        browseContent={<BrowsePage onEnterDebateRoom={(challenge, role) => { setDebateChallenge(challenge); setDebateUserRole(role ?? null); }} />}
         learningHubContent={<LearningHubPage />}
         profileContent={
           <ProfilePage userProfile={userProfile} onLogout={handleLogout} />
         }
         userProfile={userProfile}
+        debateChallenge={debateChallenge}
+        onExitDebateRoom={() => { setDebateChallenge(null); setDebateUserRole(null); }}
+        userRole={debateUserRole}
       />
     </>
   );

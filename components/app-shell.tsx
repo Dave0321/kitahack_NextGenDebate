@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FriendsPage } from "@/components/pages/friends-page";
+import { DebateRoomPage } from "@/components/debate/debate-room-page";
+import type { YoutubeChallenge } from "@/lib/models/youtube-challenge";
 import type { UserProfile } from "@/lib/models/user-profile";
 
 interface AppShellProps {
@@ -17,6 +19,9 @@ interface AppShellProps {
   learningHubContent: ReactNode;
   profileContent: ReactNode;
   userProfile: UserProfile;
+  debateChallenge?: YoutubeChallenge | null;
+  onExitDebateRoom?: () => void;
+  userRole?: "pro" | "con" | null;
 }
 
 type Tab = "browse" | "learning" | "profile";
@@ -32,13 +37,31 @@ export function AppShell({
   learningHubContent,
   profileContent,
   userProfile,
+  debateChallenge,
+  onExitDebateRoom,
+  userRole,
 }: AppShellProps) {
   const [activeTab, setActiveTab] = useState<Tab>("browse");
   const [showFriends, setShowFriends] = useState(false);
+  const CURRENT_USER = "DebateMe_User";
 
   // If friends page is open, render it
   if (showFriends) {
     return <FriendsPage onBack={() => setShowFriends(false)} />;
+  }
+
+  // Full-screen debate room — bypasses header/nav entirely
+  if (debateChallenge) {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#07070e]">
+        <DebateRoomPage
+          challenge={debateChallenge}
+          currentUser={CURRENT_USER}
+          onExit={() => onExitDebateRoom?.()}
+          userRole={userRole ?? undefined}
+        />
+      </div>
+    );
   }
 
   return (
