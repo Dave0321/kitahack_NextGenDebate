@@ -4,7 +4,21 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { YoutubeChallenge } from "@/lib/models/youtube-challenge";
 import { YouTubePlayer } from "@/components/debate/youtube-player";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Spinner } from "@/components/ui/spinner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { DebateMessage, ModerationResult, QualityFlag } from "@/lib/models/moderation";
+import { DebateModerator } from "@/lib/utils/debate-moderator";
+import { toast } from "sonner";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
     ArrowLeft,
     Timer,
@@ -19,6 +33,8 @@ import {
     BarChart2,
     Zap,
     Scale,
+    RefreshCw,
+    AlertCircle,
 } from "lucide-react";
 
 interface DebateRoomPageProps {
@@ -26,6 +42,7 @@ interface DebateRoomPageProps {
     currentUser: string;
     onExit: () => void;
     userRole?: "pro" | "con"; // externally selected stance
+    opponentCharacter?: "logician" | "activist";
 }
 
 interface Message {
@@ -35,9 +52,11 @@ interface Message {
     text: string;
     timestamp: Date;
     score?: number; // AI quality score 1-10
+    flags?: QualityFlag[]; // soft-rule violations (stored for post-debate summary)
 }
 
-const ROUND_SECONDS = 300; // 5 min per round
+const ROUND_SECONDS = 30; // 5 min per round
+const MAX_ROUNDS = 1;
 
 // Simulated AI analysis of argument quality
 function scoreArgument(text: string): number {
@@ -59,7 +78,38 @@ const AI_PROMPTS = [
     "Anticipate and refute a likely counterpoint.",
 ];
 
-export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: DebateRoomPageProps) {
+const LOGICIAN_PROMPT = `You are a formal debate opponent called "The Stoic Logician".
+You argue strictly using logic, evidence, and verifiable data.
+You identify logical fallacies in the opponent's arguments when present.
+You never use emotional language.
+Keep every response under 3 sentences.
+You are arguing the {side} side of this debate: {topic}.
+Respond directly to the opponent's last argument.`;
+
+const ACTIVIST_PROMPT = `You are a passionate debate opponent called "The Passionate Activist".
+You argue using human impact, real world consequences, and emotional appeal.
+You connect every argument back to how it affects real people's lives and SDG goals.
+Keep every response under 3 sentences.
+You are arguing the {side} side of this debate: {topic}.
+Respond directly to the opponent's last argument.`;
+
+const LOGICIAN_FALLBACKS = [
+    "Your argument lacks empirical support. Provide verifiable data to substantiate your claim.",
+    "This reasoning contains a logical gap. Correlation does not imply causation.",
+    "The evidence does not support this conclusion. Consider reviewing peer-reviewed sources.",
+    "Your premise is unsubstantiated. A valid argument requires measurable evidence.",
+    "This position overlooks a critical logical flaw that undermines your conclusion.",
+];
+
+const ACTIVIST_FALLBACKS = [
+    "Behind every statistic is a human life. We cannot afford to ignore the real people affected.",
+    "This isn't just a policy debate — families and communities depend on us getting this right.",
+    "The data matters, but so do the millions of lives that hang in the balance of this decision.",
+    "History will judge us by how we responded when it mattered most to the vulnerable.",
+    "Every day we delay, real people suffer real consequences. We must act with urgency.",
+];
+
+export function DebateRoomPage({ challenge, currentUser, onExit, userRole, opponentCharacter = "logician" }: DebateRoomPageProps) {
     const isPlayerOne = challenge.raisedBy === currentUser;
     const myName = currentUser;
     const opponentName = isPlayerOne ? (challenge.acceptedBy ?? "Challenger") : challenge.raisedBy;
@@ -97,6 +147,18 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
     const [oppTyping, setOppTyping] = useState(false);
     const [activeTip, setActiveTip] = useState<string | null>(null);
 
+    // Moderation states
+    const [pendingMessage, setPendingMessage] = useState<string>('');
+    const [isWarningOpen, setIsWarningOpen] = useState<boolean>(false);
+    const [isBlockedOpen, setIsBlockedOpen] = useState<boolean>(false);
+    const [isModerating, setIsModerating] = useState<boolean>(false);
+    const [userScore, setUserScore] = useState<number>(100);
+    const [isRegenerateVisible, setIsRegenerateVisible] = useState<boolean>(false);
+    const [currentModerationResult, setCurrentModerationResult] = useState<ModerationResult | null>(null);
+    const [blockedResult, setBlockedResult] = useState<ModerationResult | null>(null);
+    const [isSummaryOpen, setIsSummaryOpen] = useState<boolean>(false);
+    const [debateEndReason, setDebateEndReason] = useState<"completed" | "forfeit">("completed");
+
     const myMessagesEndRef = useRef<HTMLDivElement>(null);
     const oppMessagesEndRef = useRef<HTMLDivElement>(null);
     const oppTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -109,7 +171,7 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
     };
 
     const sendMessage = useCallback(
-        (player: "pro" | "con", name: string, text: string) => {
+        (player: "pro" | "con", name: string, text: string, flags?: QualityFlag[]) => {
             if (!text.trim()) return;
             const score = scoreArgument(text);
             const msg: Message = {
@@ -119,6 +181,7 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
                 text: text.trim(),
                 timestamp: new Date(),
                 score,
+                flags, // attach soft-rule flags
             };
             setMessages((prev) => [...prev, msg]);
             return msg;
@@ -126,24 +189,133 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
         []
     );
 
-    const handleMySend = () => {
-        if (!myInput.trim()) return;
-        sendMessage(myRole, myName, myInput);
-        setMyInput("");
+    function handleGameOver() {
+        // TODO: Implement full game-over UI and end-state screen
+        console.log('Game over — user reached score 0 due to rule violations');
+    }
+
+    const endDebate = (reason: "completed" | "forfeit") => {
+        setTimerRunning(false);
+        setDebateEndReason(reason);
+        setIsSummaryOpen(true);
+    };
+
+    async function getAIResponse(userMessage: string): Promise<string> {
+        const opponentSide: "pro" | "con" = myRole === "pro" ? "con" : "pro";
+        const basePrompt = opponentCharacter === "logician" ? LOGICIAN_PROMPT : ACTIVIST_PROMPT;
+        const systemPrompt = basePrompt
+            .replace("{side}", opponentSide)
+            .replace("{topic}", challenge.topic);
+
+        try {
+            const apiKey = process.env.NEXT_PUBLIC_GEMINI_KEY;
+            if (!apiKey) {
+                throw new Error("Missing Gemini API key");
+            }
+
+            const mappedHistory: DebateMessage[] = [
+                ...messages.map((m) => ({
+                    role: (m.player === myRole ? "user" : "assistant") as DebateMessage["role"],
+                    content: m.text,
+                    flags: m.flags,
+                })),
+                { role: "user" as const, content: userMessage },
+            ];
+
+            const recent = mappedHistory.slice(-6);
+            const contents = recent.map((m) => ({
+                role: m.role === "user" ? ("user" as const) : ("model" as const),
+                parts: [{ text: m.content }],
+            }));
+
+            const client = new GoogleGenerativeAI(apiKey);
+            const model = client.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+            const geminiCall = model.generateContent({
+                systemInstruction: systemPrompt,
+                contents,
+            });
+
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("Gemini response timeout")), 8000)
+            );
+
+            const result = await Promise.race([geminiCall, timeoutPromise]);
+            return result.response.text().trim();
+        } catch {
+            // TODO: Replace fallback replies with live character-specific Gemini responses when quota is available
+            const fallbacks = opponentCharacter === "logician" ? LOGICIAN_FALLBACKS : ACTIVIST_FALLBACKS;
+            return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        }
+    }
+
+    function executeSend(content: string, penalty: number, flags?: QualityFlag[]) {
+        // Check if user score would drop to 0 or below
+        if (userScore + penalty <= 0) {
+            handleGameOver();
+            return;
+        }
+
+        // Apply penalty if any
+        setUserScore((prev) => prev + penalty);
+
+        // Send user message with any soft-rule flags attached
+        sendMessage(myRole, myName, content, flags);
+        setMyInput('');
 
         // Simulate opponent thinking and replying
         setOppTyping(true);
         if (oppTimerRef.current) clearTimeout(oppTimerRef.current);
-        oppTimerRef.current = setTimeout(() => {
-            const replies = [
-                "I understand your point, but consider this: the data suggests otherwise when examined in context.",
-                "That's an interesting perspective. However, evidence points towards a more nuanced conclusion.",
-                "While true to some extent, the broader implications contradict your argument significantly.",
-                "I'd push back on that — independent studies have consistently shown the opposite.",
-                "You raise a fair point, but this overlooks a critical factor that fundamentally changes the analysis.",
+
+        oppTimerRef.current = setTimeout(async () => {
+            let selectedReply = await getAIResponse(content);
+
+            // Map messages to DebateMessage[] format for moderation check
+            const mappedHistory: DebateMessage[] = [
+                ...messages.map((m) => ({
+                    role: (m.player === myRole ? "user" : "assistant") as DebateMessage["role"],
+                    content: m.text,
+                    flags: m.flags, // preserve flags from history
+                })),
+                { role: "user" as const, content },
             ];
-            const reply = replies[Math.floor(Math.random() * replies.length)];
-            sendMessage(oppRole, opponentName, reply);
+
+            // Check opponent response through moderation
+            let moderationResult = await DebateModerator.checkRules(
+                selectedReply,
+                mappedHistory,
+                {
+                    title: challenge.topic,
+                    description: challenge.topic,
+                    selectedSDG: '', // TODO: Pass actual SDG when YoutubeChallenge model includes sdgTag field
+                    userStance: userRole ?? 'pro',
+                }
+            );
+
+            // If blocked, retry once
+            if (moderationResult.verdict === 'block') {
+                selectedReply = await getAIResponse(content);
+                moderationResult = await DebateModerator.checkRules(
+                    selectedReply,
+                    mappedHistory,
+                    {
+                        title: challenge.topic,
+                        description: challenge.topic,
+                        selectedSDG: '', // TODO: Pass actual SDG when YoutubeChallenge model includes sdgTag field
+                        userStance: userRole ?? 'pro',
+                    }
+                );
+
+                // If retry also blocked, show regenerate button
+                if (moderationResult.verdict === 'block') {
+                    setIsRegenerateVisible(true);
+                    setOppTyping(false);
+                    return;
+                }
+            }
+
+            // Send opponent reply with soft-rule flags (never penalize user for AI mistakes)
+            sendMessage(oppRole, opponentName, selectedReply, moderationResult.qualityFlags);
             setOppTyping(false);
         }, 1500 + Math.random() * 2000);
 
@@ -151,6 +323,53 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
         const tip = AI_PROMPTS[Math.floor(Math.random() * AI_PROMPTS.length)];
         setActiveTip(tip);
         setTimeout(() => setActiveTip(null), 5000);
+    }
+
+    const handleMySend = async () => {
+        if (!myInput.trim()) return;
+
+        setIsModerating(true);
+        setPendingMessage(myInput);
+
+        // Map existing messages to DebateMessage[] format
+        const mappedHistory: DebateMessage[] = messages.map((m) => ({
+            role: m.player === myRole ? 'user' : 'assistant',
+            content: m.text,
+            flags: m.flags, // preserve flags from history
+        }));
+
+        // Check message against moderation rules
+        const result = await DebateModerator.checkRules(
+            myInput,
+            mappedHistory,
+            {
+                title: challenge.topic,
+                description: challenge.topic,
+                selectedSDG: '', // TODO: Pass actual SDG when YoutubeChallenge model includes sdgTag field
+                userStance: userRole ?? 'pro',
+            }
+        );
+
+        setCurrentModerationResult(result);
+
+        if (result.verdict === 'block') {
+            // Block: open blocking dialog and prevent send
+            setBlockedResult(result);
+            setIsBlockedOpen(true);
+            setIsModerating(false);
+            return;
+        }
+
+        if (result.verdict === 'warn') {
+            // Warn: open dialog for user choice
+            setIsWarningOpen(true);
+            setIsModerating(false);
+            return;
+        }
+
+        // Pass: send immediately (with any soft-rule flags attached)
+        executeSend(myInput, result.scoreImpact, result.qualityFlags);
+        setIsModerating(false);
     };
 
     useEffect(() => {
@@ -199,6 +418,11 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
                     </h1>
                 </div>
 
+                {/* User Score Badge */}
+                <Badge variant="outline" className="bg-cyan-500/10 border-cyan-500/30 text-cyan-300 text-xs">
+                    Score: {userScore}
+                </Badge>
+
                 {/* Live score bar */}
                 <div className="hidden md:flex items-center gap-2">
                     <span className="text-[10px] font-bold text-violet-400">PRO {proScore}</span>
@@ -224,13 +448,22 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
                     </span>
                 </div>
 
-                {seconds === 0 && (
+                {seconds === 0 && round < MAX_ROUNDS && (
                     <button
                         onClick={nextRound}
                         className="flex items-center gap-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 px-3 py-1.5 text-xs font-bold text-white transition-colors"
                     >
                         <Zap className="h-3.5 w-3.5" />
                         Next Round
+                    </button>
+                )}
+                {seconds === 0 && round >= MAX_ROUNDS && (
+                    <button
+                        onClick={() => endDebate("completed")}
+                        className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition-colors"
+                    >
+                        <Crown className="h-3.5 w-3.5" />
+                        End Debate
                     </button>
                 )}
             </header>
@@ -261,8 +494,14 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
                     onInputChange={setMyInput}
                     onSend={handleMySend}
                     messagesEndRef={myMessagesEndRef}
-                    disabled={myInput.trim().length === 0}
+                    disabled={myInput.trim().length === 0 || isModerating || isWarningOpen || isBlockedOpen}
                     isTyping={myTyping}
+                    isModerating={isModerating}
+                    isRegenerateVisible={isRegenerateVisible}
+                    onRegenerate={() => {
+                        setIsRegenerateVisible(false);
+                        executeSend(pendingMessage, 0, currentModerationResult?.qualityFlags);
+                    }}
                 />
 
                 {/* ── CENTER: Resource + scoreboard ────────────────────────────── */}
@@ -338,7 +577,7 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
                     {/* End debate */}
                     <div className="p-3">
                         <Button
-                            onClick={onExit}
+                            onClick={() => endDebate("forfeit")}
                             variant="outline"
                             className="w-full bg-transparent border-rose-500/30 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 hover:border-rose-500/50 transition-all text-xs"
                         >
@@ -376,10 +615,279 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole }: Deb
                     </div>
                     <span className="text-xs font-bold text-rose-400">CON {conScore}</span>
                 </div>
-                <Button onClick={onExit} variant="outline" size="sm" className="border-rose-500/30 text-rose-400 hover:bg-rose-500/10 text-xs">
+                <Button onClick={() => endDebate("forfeit")} variant="outline" size="sm" className="border-rose-500/30 text-rose-400 hover:bg-rose-500/10 text-xs">
                     <Flag className="h-3.5 w-3.5 mr-1" /> Forfeit
                 </Button>
             </div>
+
+            {/* ── Block Dialog ───────────────────────────────────────────── */}
+            <Dialog
+                open={isBlockedOpen}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setIsBlockedOpen(false);
+                        setBlockedResult(null);
+                        setMyInput('');
+                    }
+                }}
+            >
+                <DialogContent className="bg-[#0a0a18] border border-rose-500/30">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-rose-400">
+                            <AlertCircle className="h-5 w-5 text-rose-400" />
+                            🚫 Message Blocked
+                        </DialogTitle>
+                        <DialogDescription className="text-white/70">
+                            {blockedResult?.violationType || 'Your message has been blocked by the moderator.'}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3 py-4">
+                        <div className="rounded-lg bg-rose-500/10 border border-rose-500/30 p-3">
+                            <p className="text-sm text-rose-100">
+                                {blockedResult?.feedback || 'This message cannot be sent because it violates debate rules.'}
+                            </p>
+                        </div>
+                        {blockedResult?.suggestedCorrection && (
+                            <div className="rounded-lg bg-white/5 border border-white/10 p-3">
+                                <p className="text-xs text-white/50 mb-1">Suggestion:</p>
+                                <p className="text-sm text-white/80">
+                                    {blockedResult.suggestedCorrection}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            onClick={() => {
+                                setIsBlockedOpen(false);
+                                setBlockedResult(null);
+                                setMyInput('');
+                            }}
+                            className="w-full bg-rose-600 hover:bg-rose-500 text-white"
+                        >
+                            Got it
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Warning Dialog ─────────────────────────────────────────── */}
+            <Dialog open={isWarningOpen} onOpenChange={setIsWarningOpen}>
+                <DialogContent className="bg-[#0a0a18] border border-amber-500/20">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-amber-400">
+                            <AlertCircle className="h-5 w-5" />
+                            Argument Warning
+                        </DialogTitle>
+                        <DialogDescription className="text-white/70">
+                            {currentModerationResult?.violationType || 'Your message has been flagged'}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3 py-4">
+                        <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3">
+                            <p className="text-sm text-amber-200">
+                                {currentModerationResult?.feedback || 'Please review your message'}
+                            </p>
+                        </div>
+                        {currentModerationResult?.suggestedCorrection && (
+                            <div className="rounded-lg bg-white/5 border border-white/10 p-3">
+                                <p className="text-xs text-white/50 mb-1">Suggestion:</p>
+                                <p className="text-sm text-white/80">
+                                    {currentModerationResult.suggestedCorrection}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter className="gap-2 flex-row">
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsWarningOpen(false)}
+                            className="bg-transparent border-white/20 hover:bg-white/10 text-white"
+                        >
+                            Edit Message
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                setIsWarningOpen(false);
+                                executeSend(pendingMessage, currentModerationResult?.scoreImpact || 0, currentModerationResult?.qualityFlags);
+                            }}
+                            className="bg-amber-600 hover:bg-amber-500 text-white"
+                        >
+                            Proceed Anyway
+                            {currentModerationResult?.scoreImpact && currentModerationResult.scoreImpact !== 0 && (
+                                <span className="ml-2 text-xs">{currentModerationResult.scoreImpact} pts</span>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Post-debate Summary Dialog ─────────────────────────────── */}
+            <Dialog open={isSummaryOpen} onOpenChange={() => { }}>
+                <DialogContent className="bg-[#07070e] border border-violet-500/30 max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-white">
+                            {debateEndReason === "completed" ? (
+                                <>
+                                    <span className="text-emerald-400 text-lg">🏆</span>
+                                    <span className="text-emerald-300">Debate Complete</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span className="text-rose-400 text-lg">🏳️</span>
+                                    <span className="text-rose-300">Debate Forfeited</span>
+                                </>
+                            )}
+                        </DialogTitle>
+                        <DialogDescription className="text-white/60">
+                            {challenge.topic}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-3">
+                        {/* Final Score */}
+                        <section className="rounded-xl bg-white/5 border border-white/10 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/40 mb-1.5">
+                                Final Score
+                            </p>
+                            {(() => {
+                                const scoreColor =
+                                    userScore > 70
+                                        ? "text-emerald-300"
+                                        : userScore >= 40
+                                            ? "text-amber-300"
+                                            : "text-rose-300";
+                                const badgeBg =
+                                    userScore > 70
+                                        ? "bg-emerald-500/20"
+                                        : userScore >= 40
+                                            ? "bg-amber-500/20"
+                                            : "bg-rose-500/20";
+                                const warnings = (100 - userScore) / 10;
+                                return (
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <p className={`text-2xl font-bold ${scoreColor}`}>
+                                                {userScore} / 100
+                                            </p>
+                                            <p className="text-xs text-white/60 mt-1">
+                                                Total penalties: {warnings} warning(s) received
+                                            </p>
+                                        </div>
+                                        <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] ${badgeBg} text-white/80`}>
+                                            Overall Performance
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                        </section>
+
+                        {/* Argument Quality */}
+                        <section className="rounded-xl bg-white/5 border border-white/10 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/40 mb-1.5">
+                                Argument Quality
+                            </p>
+                            {(() => {
+                                const mySideMessages = messages.filter((m) => m.player === myRole);
+                                const myArgumentCount = mySideMessages.length;
+                                const myCumulativeScore = myRole === "pro" ? proScore : conScore;
+                                return (
+                                    <div className="flex items-center justify-between gap-4">
+                                        <div>
+                                            <p className="text-sm text-white/80">
+                                                Your arguments:{" "}
+                                                <span className="font-semibold text-violet-300">
+                                                    {myArgumentCount}
+                                                </span>
+                                            </p>
+                                            <p className="text-sm text-white/80 mt-1">
+                                                Cumulative strength score:{" "}
+                                                <span className="font-semibold text-violet-300">
+                                                    {myCumulativeScore}
+                                                </span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                        </section>
+
+                        {/* Fallacies Flagged */}
+                        <section className="rounded-xl bg-white/5 border border-white/10 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/40 mb-1.5">
+                                Fallacies Flagged
+                            </p>
+                            {(() => {
+                                const flaggedMessages = messages.filter(
+                                    (m) => m.flags && m.flags.length > 0
+                                );
+                                if (flaggedMessages.length === 0) {
+                                    return (
+                                        <p className="text-sm text-emerald-300 flex items-center gap-2">
+                                            <span>✅</span>
+                                            <span>No fallacies detected — clean debate!</span>
+                                        </p>
+                                    );
+                                }
+                                return (
+                                    <div className="space-y-2">
+                                        {flaggedMessages.map((m) =>
+                                            (m.flags ?? []).map((flag, idx) => (
+                                                <div
+                                                    key={`${m.id}-${idx}`}
+                                                    className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2"
+                                                >
+                                                    <p className="text-xs font-semibold text-amber-200">
+                                                        {flag.type}
+                                                    </p>
+                                                    <p className="text-xs text-amber-100/80 mt-0.5">
+                                                        {flag.description}
+                                                    </p>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                );
+                            })()}
+                            <p className="mt-2 text-[10px] text-white/40">
+                                // Detailed AI analysis coming soon
+                            </p>
+                        </section>
+
+                        {/* Round Summary */}
+                        <section className="rounded-xl bg-white/5 border border-white/10 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/40 mb-1.5">
+                                Round Summary
+                            </p>
+                            <p className="text-sm text-white/80">
+                                Completed{" "}
+                                <span className="font-semibold text-violet-300">
+                                    {round}
+                                </span>{" "}
+                                of{" "}
+                                <span className="font-semibold text-violet-300">
+                                    {MAX_ROUNDS}
+                                </span>{" "}
+                                rounds
+                            </p>
+                        </section>
+                    </div>
+
+                    <DialogFooter className="mt-2">
+                        <Button
+                            onClick={onExit}
+                            className="w-full bg-violet-600 hover:bg-violet-500 text-white font-semibold"
+                        >
+                            Exit Debate
+                        </Button>
+                        {/* TODO: Add Gemini-generated personalised feedback button here */}
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
@@ -486,6 +994,9 @@ interface PlayerColumnProps {
     messagesEndRef: React.RefObject<HTMLDivElement | null>;
     disabled: boolean;
     isTyping?: boolean;
+    isModerating?: boolean;
+    isRegenerateVisible?: boolean;
+    onRegenerate?: () => void;
 }
 
 function PlayerColumn({
@@ -499,6 +1010,9 @@ function PlayerColumn({
     messagesEndRef,
     disabled,
     isTyping,
+    isModerating = false,
+    isRegenerateVisible = false,
+    onRegenerate,
 }: PlayerColumnProps) {
     const isPro = role === "pro";
     const accent = isPro
@@ -596,6 +1110,21 @@ function PlayerColumn({
                     </div>
                 )}
 
+                {/* Regenerate button */}
+                {isRegenerateVisible && (
+                    <div className="flex items-center justify-center py-2">
+                        <Button
+                            onClick={onRegenerate}
+                            variant="outline"
+                            size="sm"
+                            className="gap-2 bg-white/5 border-white/10 hover:bg-white/10 text-white/70"
+                        >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            Regenerate Response
+                        </Button>
+                    </div>
+                )}
+
                 <div ref={messagesEndRef} />
             </div>
 
@@ -616,8 +1145,9 @@ function PlayerColumn({
                         onKeyDown={handleKey}
                         rows={3}
                         placeholder={isMe ? "Type your argument… (Enter to send)" : `${name} is responding…`}
-                        readOnly={!isMe}
-                        className="w-full resize-none bg-transparent px-3 pt-2.5 pb-8 text-sm text-white/90 placeholder-white/20 outline-none leading-relaxed"
+                        readOnly={!isMe || isModerating}
+                        disabled={isModerating}
+                        className="w-full resize-none bg-transparent px-3 pt-2.5 pb-8 text-sm text-white/90 placeholder-white/20 outline-none leading-relaxed disabled:opacity-50"
                     />
                     {/* Char count */}
                     <span className="absolute bottom-2 left-3 text-[9px] text-white/20">
@@ -625,15 +1155,19 @@ function PlayerColumn({
                     </span>
                     <button
                         onClick={onSend}
-                        disabled={disabled}
+                        disabled={disabled || isModerating}
                         className={cn(
                             "absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-lg transition-all shadow-md",
-                            !disabled
+                            !disabled && !isModerating
                                 ? `${accent.btn} text-white`
                                 : "bg-white/5 text-white/20 cursor-not-allowed"
                         )}
                     >
-                        <Send className="h-3.5 w-3.5" />
+                        {isModerating ? (
+                            <Spinner className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                            <Send className="h-3.5 w-3.5" />
+                        )}
                     </button>
                 </div>
             </div>
