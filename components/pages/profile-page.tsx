@@ -191,9 +191,6 @@ export function ProfilePage({ userProfile, onLogout }: ProfilePageProps) {
     window.addEventListener("debate_me_challenges_updated", syncChallenges);
     window.addEventListener("storage", syncChallenges);
 
-    // Crucial: call sync on mount and when userProfile changes
-    syncChallenges();
-
     return () => {
       window.removeEventListener("debate_me_challenges_updated", syncChallenges);
       window.removeEventListener("storage", syncChallenges);
