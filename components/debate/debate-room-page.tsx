@@ -1,4 +1,3 @@
-// components/debate/debate-room-page.tsx
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -19,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { DebateMessage, ModerationResult, QualityFlag } from "@/lib/models/moderation";
 import { DebateModerator } from "@/lib/utils/debate-moderator";
 import { toast } from "sonner";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateAIOpponentMessage } from "@/lib/utils/ai-opponent";
 import {
   ArrowLeft,
   Timer,
@@ -78,23 +77,6 @@ interface Message {
 const ROUND_SECONDS = 30;
 const MAX_ROUNDS    = 1;
 
-// Kept as last-resort fallbacks if Gemini is unavailable during a live debate
-const LOGICIAN_FALLBACKS = [
-  "Your argument lacks empirical support. Provide verifiable data to substantiate your claim.",
-  "This reasoning contains a logical gap. Correlation does not imply causation.",
-  "The evidence does not support this conclusion. Consider reviewing peer-reviewed sources.",
-  "Your premise is unsubstantiated. A valid argument requires measurable evidence.",
-  "This position overlooks a critical logical flaw that undermines your conclusion.",
-];
-
-const ACTIVIST_FALLBACKS = [
-  "Behind every statistic is a human life. We cannot afford to ignore the real people affected.",
-  "This isn't just a policy debate — families and communities depend on us getting this right.",
-  "The data matters, but so do the millions of lives that hang in the balance of this decision.",
-  "History will judge us by how we responded when it mattered most to the vulnerable.",
-  "Every day we delay, real people suffer real consequences. We must act with urgency.",
-];
-
 // Local heuristic for real-time argument quality dots (UI only, not used in final scoring)
 function scoreArgument(text: string): number {
   const words      = text.trim().split(/\s+/).length;
@@ -105,22 +87,6 @@ function scoreArgument(text: string): number {
   if (hasCounter) score = Math.min(10, score + 1);
   return score;
 }
-
-// AI character system prompts
-const LOGICIAN_PROMPT = `You are a formal debate opponent called "The Stoic Logician".
-You argue strictly using logic, evidence, and verifiable data.
-You identify logical fallacies in the opponent's arguments when present.
-You never use emotional language.
-Keep every response under 3 sentences.
-You are arguing the {side} side of this debate: {topic}.
-Respond directly to the opponent's last argument.`;
-
-const ACTIVIST_PROMPT = `You are a passionate debate opponent called "The Passionate Activist".
-You argue using human impact, real world consequences, and emotional appeal.
-You connect every argument back to how it affects real people's lives and SDG goals.
-Keep every response under 3 sentences.
-You are arguing the {side} side of this debate: {topic}.
-Respond directly to the opponent's last argument.`;
 
 // ---------------------------------------------------------------------------
 // Component
@@ -231,6 +197,8 @@ export function DebateRoomPage({
 
   function handleGameOver() {
     console.log("Game over — user reached score 0 due to rule violations");
+    toast.error("Debate forfeited due to rule violations.");
+    endDebate("forfeit");
   }
 
   // ── End debate: triggers judging ────────────────────────────────────────
@@ -243,7 +211,6 @@ export function DebateRoomPage({
       setJudgeError(null);
 
       try {
-        // Build transcript: my messages = debater A, opponent = debater B
         const transcript: DebateTranscriptEntry[] = messages.map((m) => ({
           debaterId: m.player === myRole ? "A" : "B",
           text: m.text,
@@ -269,51 +236,6 @@ export function DebateRoomPage({
     [messages, myRole, oppRole, myName, opponentName, challenge.topic],
   );
 
-  // ── AI opponent response ─────────────────────────────────────────────────
-  async function getAIResponse(userMessage: string): Promise<string> {
-    const opponentSide: "pro" | "con" = myRole === "pro" ? "con" : "pro";
-    const basePrompt = opponentCharacter === "logician" ? LOGICIAN_PROMPT : ACTIVIST_PROMPT;
-    const systemPrompt = basePrompt
-      .replace("{side}", opponentSide)
-      .replace("{topic}", challenge.topic);
-
-    try {
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_KEY;
-      if (!apiKey) throw new Error("Missing Gemini API key");
-
-      const mappedHistory: DebateMessage[] = [
-        ...messages.map((m) => ({
-          role:    (m.player === myRole ? "user" : "assistant") as DebateMessage["role"],
-          content: m.text,
-          flags:   m.flags,
-        })),
-        { role: "user" as const, content: userMessage },
-      ];
-
-      const recent   = mappedHistory.slice(-6);
-      const contents = recent.map((m) => ({
-        role:  m.role === "user" ? ("user" as const) : ("model" as const),
-        parts: [{ text: m.content }],
-      }));
-
-      const client = new GoogleGenerativeAI(apiKey);
-      const model  = client.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-      const result = await Promise.race([
-        model.generateContent({ systemInstruction: systemPrompt, contents }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Gemini response timeout")), 8000),
-        ),
-      ]);
-
-      return result.response.text().trim();
-    } catch {
-      const fallbacks =
-        opponentCharacter === "logician" ? LOGICIAN_FALLBACKS : ACTIVIST_FALLBACKS;
-      return fallbacks[Math.floor(Math.random() * fallbacks.length)];
-    }
-  }
-
   function executeSend(content: string, penalty: number, flags?: QualityFlag[]) {
     if (userScore + penalty <= 0) {
       handleGameOver();
@@ -328,7 +250,17 @@ export function DebateRoomPage({
     if (oppTimerRef.current) clearTimeout(oppTimerRef.current);
 
     oppTimerRef.current = setTimeout(async () => {
-      let selectedReply = await getAIResponse(content);
+      // 1. Generate AI response using the centralized service
+      let selectedReply = await generateAIOpponentMessage({
+        topic: challenge.topic,
+        sdg: "Target SDG", // Ideally passed from challenge if available
+        aiStance: oppRole,
+        persona: opponentCharacter, // Ensure ai-opponent.ts handles this
+        transcript: messages.map((m) => ({
+          debaterId: m.player === myRole ? "user" : "ai",
+          text: m.text,
+        })).concat([{ debaterId: "user", text: content }]),
+      });
 
       const mappedHistory: DebateMessage[] = [
         ...messages.map((m) => ({
@@ -339,6 +271,7 @@ export function DebateRoomPage({
         { role: "user" as const, content },
       ];
 
+      // 2. Moderate the AI's response for safety
       let moderationResult = await DebateModerator.checkRules(selectedReply, mappedHistory, {
         title:       challenge.topic,
         description: challenge.topic,
@@ -346,8 +279,19 @@ export function DebateRoomPage({
         userStance:  userRole ?? "pro",
       });
 
+      // 3. Auto-regenerate if AI blocked itself
       if (moderationResult.verdict === "block") {
-        selectedReply    = await getAIResponse(content);
+        selectedReply    = await generateAIOpponentMessage({
+          topic: challenge.topic,
+          sdg: "",
+          aiStance: oppRole,
+          persona: opponentCharacter,
+          transcript: mappedHistory.map(m => ({
+            debaterId: m.role === "user" ? "user" : "ai",
+            text: m.content
+          }))
+        });
+
         moderationResult = await DebateModerator.checkRules(selectedReply, mappedHistory, {
           title:       challenge.topic,
           description: challenge.topic,

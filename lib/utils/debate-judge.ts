@@ -164,8 +164,11 @@ REQUIRED JSON OUTPUT SCHEMA (respond with this and only this):
 export async function judgeDebate(params: JudgeParams): Promise<DebateJudgement> {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_KEY;
   if (!apiKey) {
-    console.warn("judgeDebate: missing NEXT_PUBLIC_GEMINI_KEY — returning fallback");
+    console.error("❌ ERROR: NEXT_PUBLIC_GEMINI_KEY is MISSING in your .env file!");
+    console.warn("⚠️ judgeDebate: returning fallback hardcoded summary.");
     return buildFallbackJudgement(params);
+  } else {
+    console.log("✅ SUCCESS: Gemini API Key detected! Attempting to judge debate...");
   }
 
   // Sanitize labels used in the data envelope (not instructions)
@@ -188,7 +191,7 @@ Evaluate the debate above according to your system instructions and return the J
   try {
     const client = new GoogleGenerativeAI(apiKey);
     const model  = client.getGenerativeModel({
-      model: "gemini-2.0-flash",
+      model: "gemini-3-flash-preview",
       generationConfig: {
         temperature: 0.2,           // low temperature → deterministic, reproducible scores
         responseMimeType: "application/json",
@@ -201,7 +204,7 @@ Evaluate the debate above according to your system instructions and return the J
         contents: [{ role: "user", parts: [{ text: userMessage }] }],
       }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Judge timeout after 20 s")), 20_000),
+        setTimeout(() => reject(new Error("Judge timeout after 60 s")), 60_000),
       ),
     ]);
 
@@ -278,8 +281,12 @@ Return ONLY a valid JSON object — no markdown, no explanation.`;
 
 export async function generateDebateTopicContent(topic: string): Promise<TopicContent> {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_KEY;
-  if (!apiKey) return FALLBACK_TOPIC_CONTENT;
-
+if (!apiKey) {
+    console.error("❌ ERROR: NEXT_PUBLIC_GEMINI_KEY is MISSING! Using fallback topic content.");
+    return FALLBACK_TOPIC_CONTENT;
+  } else {
+    console.log("✅ SUCCESS: Gemini API Key detected for generating topic content.");
+  }
   const safeTopic = sanitizeLabel(topic);
 
   const userMessage = `Generate debate interface content for this topic: "${xmlEscape(safeTopic)}"
@@ -320,9 +327,9 @@ judgeComments must sound like an impartial AI judge making real-time observation
   try {
     const client = new GoogleGenerativeAI(apiKey);
     const model  = client.getGenerativeModel({
-      model: "gemini-2.0-flash",
+      model: "gemini-3-flash-preview",
       generationConfig: {
-        temperature: 0.75,
+        temperature: 0.20,
         responseMimeType: "application/json",
       },
     });
