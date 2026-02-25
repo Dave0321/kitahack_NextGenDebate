@@ -90,6 +90,9 @@ Based on the transcript, write your next debate response targeting the opponent'
 
   try {
     const client = new GoogleGenerativeAI(apiKey);
+    const dynamicPrompt = typeof window !== "undefined" 
+  ? localStorage.getItem("admin_ai_opponent_prompt") || AI_OPPONENT_SYSTEM_PROMPT 
+  : AI_OPPONENT_SYSTEM_PROMPT;
     const model = client.getGenerativeModel({
       model: "gemini-3-flash-preview",
       generationConfig: {
@@ -98,10 +101,10 @@ Based on the transcript, write your next debate response targeting the opponent'
     });
 
     const raceResult = await Promise.race([
-      model.generateContent({
-        systemInstruction: AI_OPPONENT_SYSTEM_PROMPT,
-        contents: [{ role: "user", parts: [{ text: userMessage }] }],
-      }),
+    model.generateContent({
+      systemInstruction: dynamicPrompt, // Use the dynamic prompt here
+      contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("AI opponent timeout after 15s")), 15_000)
       ),

@@ -1,5 +1,5 @@
 "use client";
-
+import { AdminPage } from "@/components/pages/admin-page"; // Add import
 import { useState } from "react";
 import { AuthPage } from "@/components/pages/auth-page";
 import { AppShell } from "@/components/app-shell";
@@ -16,6 +16,7 @@ import type { YoutubeChallenge } from "@/lib/models/youtube-challenge";
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false); // Add this
   const [userProfile, setUserProfile] = useState<UserProfile>(
     createBlankProfile()
   );
@@ -23,8 +24,9 @@ export default function Home() {
   const [debateChallenge, setDebateChallenge] = useState<YoutubeChallenge | null>(null);
   const [debateUserRole, setDebateUserRole] = useState<"pro" | "con" | null>(null);
 
-  const handleLogin = () => {
+  const handleLogin = (email: string) => {
     setIsAuthenticated(true);
+    setIsAdmin(email === "admin@debateme.com"); // Check if admin
     if (!userProfile.hasCompletedOnboarding()) {
       setShowOnboarding(true);
     }
@@ -54,6 +56,8 @@ export default function Home() {
         <ProfileSetup onComplete={handleOnboardingComplete} />
       )}
       <AppShell
+      isAdmin={isAdmin} // Pass this down
+        adminContent={<AdminPage />} // Pass this down
         browseContent={<BrowsePage onEnterDebateRoom={(challenge, role) => { setDebateChallenge(challenge); setDebateUserRole(role ?? null); }} />}
         learningHubContent={<LearningHubPage />}
         profileContent={

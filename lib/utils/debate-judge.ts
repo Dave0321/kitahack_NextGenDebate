@@ -188,6 +188,11 @@ ${transcriptXml}
 
 Evaluate the debate above according to your system instructions and return the JSON judgement.`;
 
+  // Read dynamic prompt from admin dashboard, or fallback to default
+  const dynamicJudgePrompt = typeof window !== "undefined" 
+    ? localStorage.getItem("admin_judge_prompt") || JUDGE_SYSTEM_PROMPT 
+    : JUDGE_SYSTEM_PROMPT;
+
   try {
     const client = new GoogleGenerativeAI(apiKey);
     const model  = client.getGenerativeModel({
@@ -200,7 +205,7 @@ Evaluate the debate above according to your system instructions and return the J
 
     const raceResult = await Promise.race([
       model.generateContent({
-        systemInstruction: JUDGE_SYSTEM_PROMPT,
+        systemInstruction: dynamicJudgePrompt,
         contents: [{ role: "user", parts: [{ text: userMessage }] }],
       }),
       new Promise<never>((_, reject) =>
@@ -281,7 +286,7 @@ Return ONLY a valid JSON object — no markdown, no explanation.`;
 
 export async function generateDebateTopicContent(topic: string): Promise<TopicContent> {
   const apiKey = process.env.NEXT_PUBLIC_GEMINI_KEY;
-if (!apiKey) {
+  if (!apiKey) {
     console.error("❌ ERROR: NEXT_PUBLIC_GEMINI_KEY is MISSING! Using fallback topic content.");
     return FALLBACK_TOPIC_CONTENT;
   } else {
@@ -324,6 +329,11 @@ Return ONLY this JSON structure:
 Tips must be actionable coaching advice specific to this exact debate topic.
 judgeComments must sound like an impartial AI judge making real-time observations.`;
 
+  // Read dynamic prompt from admin dashboard, or fallback to default
+  const dynamicTopicPrompt = typeof window !== "undefined" 
+    ? localStorage.getItem("admin_topic_content_prompt") || TOPIC_CONTENT_SYSTEM_PROMPT 
+    : TOPIC_CONTENT_SYSTEM_PROMPT;
+
   try {
     const client = new GoogleGenerativeAI(apiKey);
     const model  = client.getGenerativeModel({
@@ -336,7 +346,7 @@ judgeComments must sound like an impartial AI judge making real-time observation
 
     const raceResult = await Promise.race([
       model.generateContent({
-        systemInstruction: TOPIC_CONTENT_SYSTEM_PROMPT,
+        systemInstruction: dynamicTopicPrompt,
         contents: [{ role: "user", parts: [{ text: userMessage }] }],
       }),
       new Promise<never>((_, reject) =>

@@ -7,6 +7,7 @@ import {
   User,
   MessageSquare,
   UserPlus,
+  Shield, // Added Shield icon for Admin
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FriendsPage } from "@/components/pages/friends-page";
@@ -22,15 +23,11 @@ interface AppShellProps {
   debateChallenge?: YoutubeChallenge | null;
   onExitDebateRoom?: () => void;
   userRole?: "pro" | "con" | null;
+  isAdmin?: boolean;           // Added isAdmin prop
+  adminContent?: ReactNode;    // Added adminContent prop
 }
 
-type Tab = "browse" | "learning" | "profile";
-
-const tabs: { id: Tab; label: string; icon: typeof Compass }[] = [
-  { id: "browse", label: "Browse", icon: Compass },
-  { id: "learning", label: "Learning Hub", icon: BookOpen },
-  { id: "profile", label: "Profile", icon: User },
-];
+type Tab = "browse" | "learning" | "profile" | "admin"; // Added "admin" to Tab type
 
 export function AppShell({
   browseContent,
@@ -40,10 +37,24 @@ export function AppShell({
   debateChallenge,
   onExitDebateRoom,
   userRole,
+  isAdmin,
+  adminContent,
 }: AppShellProps) {
   const [activeTab, setActiveTab] = useState<Tab>("browse");
   const [showFriends, setShowFriends] = useState(false);
   const CURRENT_USER = "DebateMe_User";
+
+  // Base tabs that everyone sees
+  const baseTabs: { id: Tab; label: string; icon: any }[] = [
+    { id: "browse", label: "Browse", icon: Compass },
+    { id: "learning", label: "Learning Hub", icon: BookOpen },
+    { id: "profile", label: "Profile", icon: User },
+  ];
+
+  // Dynamically append Admin tab if the user has admin privileges
+  const activeTabs = isAdmin
+    ? [...baseTabs, { id: "admin" as Tab, label: "Admin", icon: Shield }]
+    : baseTabs;
 
   // Full-screen debate room — bypasses header/nav entirely
   if (debateChallenge) {
@@ -74,11 +85,12 @@ export function AppShell({
 
         {/* Desktop nav */}
         <nav className="ml-auto hidden items-center gap-1 md:flex">
-          {tabs.map((tab) => {
+          {activeTabs.map((tab) => {
             let activeColor = "text-primary bg-primary/10"; // Default
             if (tab.id === "browse") activeColor = "text-violet-500 bg-violet-500/10";
             if (tab.id === "learning") activeColor = "text-emerald-500 bg-emerald-500/10";
             if (tab.id === "profile") activeColor = "text-cyan-500 bg-cyan-500/10";
+            if (tab.id === "admin") activeColor = "text-rose-500 bg-rose-500/10";
 
             return (
               <button
@@ -138,6 +150,11 @@ export function AppShell({
         <div className={!showFriends && activeTab === "profile" ? "block" : "hidden"}>
           {profileContent}
         </div>
+        {isAdmin && (
+          <div className={!showFriends && activeTab === "admin" ? "block" : "hidden"}>
+            {adminContent}
+          </div>
+        )}
         <div className={showFriends ? "block" : "hidden"}>
           <FriendsPage />
         </div>
@@ -145,13 +162,14 @@ export function AppShell({
 
       {/* Bottom Navigation (mobile only) */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 flex h-16 items-center justify-around border-t bg-card md:hidden">
-        {tabs.map((tab) => {
+        {activeTabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = !showFriends && activeTab === tab.id;
           let activeColorMobile = "text-primary"; // Default
           if (tab.id === "browse") activeColorMobile = "text-violet-500";
           if (tab.id === "learning") activeColorMobile = "text-emerald-500";
           if (tab.id === "profile") activeColorMobile = "text-cyan-500";
+          if (tab.id === "admin") activeColorMobile = "text-rose-500";
 
           return (
             <button

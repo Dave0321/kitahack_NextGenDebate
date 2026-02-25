@@ -9,7 +9,7 @@ import { MessageSquare, Mail, Lock, User, ArrowLeft, Eye, EyeOff } from "lucide-
 type AuthView = "login" | "register" | "forgot-password";
 
 interface AuthPageProps {
-  onLogin: () => void;
+  onLogin: (email: string) => void;
 }
 
 export function AuthPage({ onLogin }: AuthPageProps) {
@@ -44,7 +44,7 @@ function LoginView({
   onSwitchToRegister,
   onForgotPassword,
 }: {
-  onLogin: () => void;
+  onLogin: (email: string) => void;
   onSwitchToRegister: () => void;
   onForgotPassword: () => void;
 }) {
@@ -116,7 +116,7 @@ function LoginView({
             </div>
           </div>
 
-          <Button className="w-full" size="lg" onClick={onLogin}>
+          <Button className="w-full" size="lg" onClick={() => onLogin(email)}>
             Sign In
           </Button>
 
@@ -129,7 +129,8 @@ function LoginView({
             </span>
           </div>
 
-          <Button variant="outline" className="w-full" size="lg" onClick={onLogin}>
+          {/* Fallback mock email for google login to prevent empty string if they click this directly */}
+          <Button variant="outline" className="w-full" size="lg" onClick={() => onLogin(email || "google@example.com")}>
             <svg className="h-4 w-4" viewBox="0 0 24 24">
               <path
                 d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
@@ -173,7 +174,7 @@ function RegisterView({
   onLogin,
   onSwitchToLogin,
 }: {
-  onLogin: () => void;
+  onLogin: (email: string) => void;
   onSwitchToLogin: () => void;
 }) {
   const [name, setName] = useState("");
@@ -252,7 +253,7 @@ function RegisterView({
             </div>
           </div>
 
-          <Button className="w-full" size="lg" onClick={onLogin}>
+          <Button className="w-full" size="lg" onClick={() => onLogin(email)}>
             Create Account
           </Button>
         </div>

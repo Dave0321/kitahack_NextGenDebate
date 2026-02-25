@@ -180,7 +180,10 @@ const STORAGE_KEY = "debate_me_challenges";
 export function loadChallenges(): YoutubeChallengeData[] {
     if (typeof window === "undefined") return seedChallenges;
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return seedChallenges;
+    if (!stored) {
+        saveChallenges(seedChallenges); // Auto-seed if completely empty
+        return seedChallenges;
+    }
     return JSON.parse(stored);
 }
 
@@ -189,4 +192,10 @@ export function saveChallenges(challenges: YoutubeChallengeData[]): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(challenges));
     // Dispatch custom event for real-time sync across components
     window.dispatchEvent(new CustomEvent("debate_me_challenges_updated"));
+}
+
+// RESTORE FUNCTION
+export function restoreDefaultChallenges(): YoutubeChallengeData[] {
+    saveChallenges(seedChallenges);
+    return seedChallenges;
 }
