@@ -38,7 +38,7 @@ function buildTranscriptXml(entries: DebateMessage[]): string {
 // ---------------------------------------------------------------------------
 // System Prompt
 // ---------------------------------------------------------------------------
-const AI_OPPONENT_SYSTEM_PROMPT = `You are an expert, highly articulate debate opponent participating in a formal 1-on-1 text debate.
+export const AI_OPPONENT_SYSTEM_PROMPT = `You are an expert, highly articulate debate opponent participating in a formal 1-on-1 text debate.
 
 ══════════════════════════════════════════════
 YOUR ROLE & GOAL:
@@ -91,20 +91,25 @@ Based on the transcript, write your next debate response targeting the opponent'
   try {
     const client = new GoogleGenerativeAI(apiKey);
     const dynamicPrompt = typeof window !== "undefined" 
-  ? localStorage.getItem("admin_ai_opponent_prompt") || AI_OPPONENT_SYSTEM_PROMPT 
-  : AI_OPPONENT_SYSTEM_PROMPT;
+      ? localStorage.getItem("admin_ai_opponent_prompt") || AI_OPPONENT_SYSTEM_PROMPT 
+      : AI_OPPONENT_SYSTEM_PROMPT;
+      
+    const dynamicTemp = typeof window !== "undefined" 
+      ? parseFloat(localStorage.getItem("admin_ai_opponent_temperature") || "0.6") 
+      : 0.6;
+
     const model = client.getGenerativeModel({
       model: "gemini-3-flash-preview",
       generationConfig: {
-        temperature: 0.6, // Slightly creative but grounded
+        temperature: dynamicTemp, // Dynamic temperature controlled by admin
       },
     });
 
     const raceResult = await Promise.race([
-    model.generateContent({
-      systemInstruction: dynamicPrompt, // Use the dynamic prompt here
-      contents: [{ role: "user", parts: [{ text: userMessage }] }],
-    }),
+      model.generateContent({
+        systemInstruction: dynamicPrompt,
+        contents: [{ role: "user", parts: [{ text: userMessage }] }],
+      }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("AI opponent timeout after 15s")), 15_000)
       ),

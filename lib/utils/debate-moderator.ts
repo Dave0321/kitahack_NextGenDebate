@@ -11,7 +11,7 @@ interface ModerationContext {
   userStance: string // 'Pro' or 'Con' — needed to detect goalpost moving
 }
 
-const DEFAULT_MODERATOR_PROMPT = `You are a strict debate moderation system. Analyze the user's message and return ONLY a valid JSON object with no markdown, no explanation, no extra text.
+export const DEFAULT_MODERATOR_PROMPT = `You are a strict debate moderation system. Analyze the user's message and return ONLY a valid JSON object with no markdown, no explanation, no extra text.
 
 The JSON must follow this exact structure:
 {
@@ -86,14 +86,22 @@ export class DebateModerator {
       if (!apiKey) throw new Error('Missing Gemini API key')
 
       const client = new GoogleGenerativeAI(apiKey)
-      const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' })
+      
+      const dynamicTemp = typeof window !== "undefined" 
+        ? parseFloat(localStorage.getItem("admin_moderator_temperature") || "0.1") 
+        : 0.1;
 
-      // Read dynamic prompt from local storage, or fallback to default
+      const model = client.getGenerativeModel({ 
+        model: 'gemini-2.0-flash',
+        generationConfig: {
+          temperature: dynamicTemp
+        }
+      })
+
       const baseAdminPrompt = typeof window !== "undefined"
         ? localStorage.getItem("admin_moderator_prompt") || DEFAULT_MODERATOR_PROMPT
         : DEFAULT_MODERATOR_PROMPT;
 
-      // Append context safely so admin doesn't need to write code in the text box
       const systemPrompt = `${baseAdminPrompt}
       
 Debate topic: "${context.title}"

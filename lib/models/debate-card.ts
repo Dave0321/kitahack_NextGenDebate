@@ -83,6 +83,7 @@ const debateCardsData: DebateCardData[] = [
     id: "debate-3",
     title: "Universal Basic Income: Utopia or Disaster?",
     description: "Should governments provide a guaranteed income to all citizens? Discuss the economic, social, and ethical dimensions of UBI.",
+    videoUrl: "https://www.youtube.com/watch?v=kl39KHS07Xc", // Added Kurzgesagt UBI video
     sdgTags: [1, 8],
     category: "trending",
     createdAt: "2026-02-13",
@@ -91,6 +92,7 @@ const debateCardsData: DebateCardData[] = [
     id: "debate-4",
     title: "Fast Fashion vs Sustainability",
     description: "The fashion industry is one of the world's largest polluters. Should fast fashion be regulated or can consumer choices drive change?",
+    videoUrl: "https://www.youtube.com/watch?v=tLfNUD0-KB0", // Added Fast Fashion video
     sdgTags: [12, 13],
     category: "trending",
     createdAt: "2026-02-12",
@@ -108,6 +110,7 @@ const debateCardsData: DebateCardData[] = [
     id: "debate-6",
     title: "Gender Pay Gap: Myth or Reality?",
     description: "Analyze the data and arguments surrounding the gender pay gap. Is it a systemic issue requiring policy intervention or a result of individual choices?",
+    videoUrl: "https://www.youtube.com/watch?v=1wq_edJeacU", // Added Gender Pay Gap video
     sdgTags: [5, 8],
     category: "continue",
     createdAt: "2026-02-09",
@@ -116,6 +119,7 @@ const debateCardsData: DebateCardData[] = [
     id: "debate-7",
     title: "Ocean Plastic: Who Is Responsible?",
     description: "Millions of tons of plastic end up in our oceans each year. Should corporations, governments, or individuals bear the responsibility?",
+    videoUrl: "https://www.youtube.com/watch?v=HQTUWK7CM-Y", // Added Ocean Plastic video
     sdgTags: [14, 12],
     category: "continue",
     createdAt: "2026-02-08",
@@ -133,6 +137,7 @@ const debateCardsData: DebateCardData[] = [
     id: "debate-9",
     title: "Deforestation and Indigenous Rights",
     description: "Should indigenous communities have the final say in protecting forests? Explore the intersection of environmental conservation and human rights.",
+    videoUrl: "https://www.youtube.com/watch?v=Ic-J6hcSKa8", // Added Deforestation video
     sdgTags: [15, 16],
     category: "recommended",
     createdAt: "2026-02-06",
@@ -141,6 +146,7 @@ const debateCardsData: DebateCardData[] = [
     id: "debate-10",
     title: "Global Vaccine Equity",
     description: "The COVID-19 pandemic exposed massive disparities in vaccine access. How do we ensure equitable distribution for future pandemics?",
+    videoUrl: "https://www.youtube.com/watch?v=132a_q5318A", // Added Vaccine Equity video
     sdgTags: [3, 10],
     category: "recommended",
     createdAt: "2026-02-05",
@@ -149,6 +155,7 @@ const debateCardsData: DebateCardData[] = [
     id: "debate-11",
     title: "Food Waste in Developed Nations",
     description: "Developed countries waste enough food to feed billions. What systemic changes are needed to address this paradox?",
+    videoUrl: "https://www.youtube.com/watch?v=ishA6kry8nc", // Added Food Waste video
     sdgTags: [2, 12],
     category: "recommended",
     createdAt: "2026-02-04",
