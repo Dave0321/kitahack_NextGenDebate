@@ -35,6 +35,8 @@ import {
   Scale,
   RefreshCw,
   AlertCircle,
+  Play,
+  CheckCircle,
 } from "lucide-react";
 import {
   generateDebateTopicContent,
@@ -45,7 +47,7 @@ import type { TopicContent, DebateJudgement } from "@/lib/models/debate-result";
 import { PostDebateSummaryModal } from "@/components/debate/post-debate-summary-modal";
 
 // ---------------------------------------------------------------------------
-// Props
+// Props & Types
 // ---------------------------------------------------------------------------
 
 interface DebateRoomPageProps {
@@ -55,10 +57,6 @@ interface DebateRoomPageProps {
   userRole?: "pro" | "con";
   opponentCharacter?: "logician" | "activist";
 }
-
-// ---------------------------------------------------------------------------
-// Local types
-// ---------------------------------------------------------------------------
 
 interface Message {
   id: string;
@@ -70,6 +68,8 @@ interface Message {
   flags?: QualityFlag[];
 }
 
+type GamePhase = "prep" | "countdown" | "debate" | "ended";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -77,7 +77,6 @@ interface Message {
 const ROUND_SECONDS = 30;
 const MAX_ROUNDS    = 1;
 
-// Local heuristic for real-time argument quality dots (UI only, not used in final scoring)
 function scoreArgument(text: string): number {
   const words      = text.trim().split(/\s+/).length;
   const hasClaims  = /because|therefore|however|evidence|studies|research|data|fact/i.test(text);
@@ -105,14 +104,19 @@ export function DebateRoomPage({
   const myRole: "pro" | "con"  = userRole ?? (isPlayerOne ? "pro" : "con");
   const oppRole: "pro" | "con" = myRole === "pro" ? "con" : "pro";
 
-  // ── Topic-specific AI content (replaces hardcoded arrays) ──────────────
+  // ── Game State & Phases ─────────────────────────────────────────────────
+  const [gamePhase, setGamePhase] = useState<GamePhase>("prep");
+  const [myReady, setMyReady]     = useState(false);
+  const [oppReady, setOppReady]   = useState(false);
+  const [countdown, setCountdown] = useState(3);
+
+  // ── Topic-specific AI content ───────────────────────────────────────────
   const [topicContent, setTopicContent] = useState<TopicContent | null>(null);
 
   useEffect(() => {
     generateDebateTopicContent(challenge.topic).then(setTopicContent);
   }, [challenge.topic]);
 
-  // Convenience accessors with graceful fallback
   const currentTips         = topicContent?.tips           ?? [];
   const currentJudgeComments = topicContent?.judgeComments ?? {
     neutral: ["Analysing the debate…"],
@@ -120,17 +124,39 @@ export function DebateRoomPage({
     conLead: ["CON is pulling ahead."],
   };
 
+  // ── Audio Context for Beeps ─────────────────────────────────────────────
+  const playBeep = useCallback((freq: number, type: OscillatorType = 'sine', duration = 0.5, vol = 0.1) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      gain.gain.setValueAtTime(vol, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch (e) {
+      console.warn("Audio context not supported", e);
+    }
+  }, []);
+
   // ── Timer ───────────────────────────────────────────────────────────────
-  const [seconds, setSeconds]         = useState(ROUND_SECONDS);
-  const [timerRunning, setTimerRunning] = useState(true);
-  const [round, setRound]             = useState(1);
+  const [seconds, setSeconds]           = useState(ROUND_SECONDS);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [round, setRound]               = useState(1);
 
   useEffect(() => {
-    if (!timerRunning) return;
+    if (!timerRunning || gamePhase !== "debate") return;
     if (seconds <= 0) { setTimerRunning(false); return; }
     const id = setInterval(() => setSeconds((s) => s - 1), 1000);
     return () => clearInterval(id);
-  }, [timerRunning, seconds]);
+  }, [timerRunning, seconds, gamePhase]);
 
   const formatTime = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
@@ -141,6 +167,44 @@ export function DebateRoomPage({
     : seconds > 60
     ? "bg-amber-500/10 border-amber-500/20"
     : "bg-rose-500/10 border-rose-500/20 animate-pulse";
+
+  // ── Pre-Game & Countdown Logic ──────────────────────────────────────────
+  
+  // Simulate AI opponent getting ready
+  useEffect(() => {
+    if (gamePhase === "prep") {
+      const timer = setTimeout(() => {
+        setOppReady(true);
+      }, 3000 + Math.random() * 4000); // 3-7 seconds delay
+      return () => clearTimeout(timer);
+    }
+  }, [gamePhase]);
+
+  // Transition to countdown when both are ready
+  useEffect(() => {
+    if (gamePhase === "prep" && myReady && oppReady) {
+      setGamePhase("countdown");
+      setCountdown(3);
+    }
+  }, [gamePhase, myReady, oppReady]);
+
+  // Handle countdown animation and sounds
+  useEffect(() => {
+    if (gamePhase === "countdown") {
+      if (countdown > 0) {
+        playBeep(440, 'square', 0.2, 0.05); // Short tick
+        const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
+        return () => clearTimeout(timer);
+      } else if (countdown === 0) {
+        playBeep(880, 'square', 0.6, 0.1); // Higher START sound
+        const timer = setTimeout(() => {
+          setGamePhase("debate");
+          setTimerRunning(true);
+        }, 1000); // Show "DEBATE!" for 1s
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [gamePhase, countdown, playBeep]);
 
   // ── Messages ─────────────────────────────────────────────────────────────
   const [messages, setMessages]   = useState<Message[]>([]);
@@ -201,9 +265,9 @@ export function DebateRoomPage({
     endDebate("forfeit");
   }
 
-  // ── End debate: triggers judging ────────────────────────────────────────
   const endDebate = useCallback(
     async (_reason: "completed" | "forfeit") => {
+      setGamePhase("ended");
       setTimerRunning(false);
       setIsSummaryOpen(true);
       setIsJudging(true);
@@ -250,12 +314,11 @@ export function DebateRoomPage({
     if (oppTimerRef.current) clearTimeout(oppTimerRef.current);
 
     oppTimerRef.current = setTimeout(async () => {
-      // 1. Generate AI response using the centralized service
       let selectedReply = await generateAIOpponentMessage({
         topic: challenge.topic,
-        sdg: "Target SDG", // Ideally passed from challenge if available
+        sdg: "Target SDG", 
         aiStance: oppRole,
-        persona: opponentCharacter, // Ensure ai-opponent.ts handles this
+        persona: opponentCharacter, 
         transcript: messages.map((m) => ({
           debaterId: m.player === myRole ? "user" : "ai",
           text: m.text,
@@ -271,7 +334,6 @@ export function DebateRoomPage({
         { role: "user" as const, content },
       ];
 
-      // 2. Moderate the AI's response for safety
       let moderationResult = await DebateModerator.checkRules(selectedReply, mappedHistory, {
         title:       challenge.topic,
         description: challenge.topic,
@@ -279,9 +341,8 @@ export function DebateRoomPage({
         userStance:  userRole ?? "pro",
       });
 
-      // 3. Auto-regenerate if AI blocked itself
       if (moderationResult.verdict === "block") {
-        selectedReply    = await generateAIOpponentMessage({
+        selectedReply = await generateAIOpponentMessage({
           topic: challenge.topic,
           sdg: "",
           aiStance: oppRole,
@@ -310,7 +371,6 @@ export function DebateRoomPage({
       setOppTyping(false);
     }, 1500 + Math.random() * 2000);
 
-    // Show a topic-specific tip if available
     if (currentTips.length > 0) {
       const tip = currentTips[Math.floor(Math.random() * currentTips.length)];
       setActiveTip(tip);
@@ -359,7 +419,6 @@ export function DebateRoomPage({
   useEffect(() => { scrollToBottom(myMessagesEndRef); }, [myMessages]);
   useEffect(() => { scrollToBottom(oppMessagesEndRef); }, [oppMessages]);
 
-  // Live score bar values
   const proScore   = messages.filter((m) => m.player === "pro").reduce((a, m) => a + (m.score ?? 0), 0);
   const conScore   = messages.filter((m) => m.player === "con").reduce((a, m) => a + (m.score ?? 0), 0);
   const totalScore = proScore + conScore || 1;
@@ -370,9 +429,20 @@ export function DebateRoomPage({
     setTimerRunning(true);
   };
 
-  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="h-screen bg-gradient-to-b from-[#07070e] via-[#0c0c1a] to-[#0f0f22] flex flex-col overflow-hidden">
+    <div className="h-screen relative bg-gradient-to-b from-[#07070e] via-[#0c0c1a] to-[#0f0f22] flex flex-col overflow-hidden">
+
+ {/* ── Countdown Overlay ────────────────────────────────────────────── */}
+      {gamePhase === "countdown" && (
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md">
+          <div key={countdown} className="animate-in zoom-in-50 fade-in duration-500 ease-out flex flex-col items-center">
+            {/* Added pr-8 below to prevent italic text clipping */}
+            <h2 className="text-[180px] md:text-[250px] font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-white via-white/90 to-white/30 drop-shadow-[0_0_60px_rgba(255,255,255,0.4)] leading-none pr-8">
+              {countdown > 0 ? countdown : "DEBATE!"}
+            </h2>
+          </div>
+        </div>
+      )}
 
       {/* ── Top bar ──────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-white/8 bg-[#09091a]/90 backdrop-blur-xl px-4 lg:px-6">
@@ -407,14 +477,14 @@ export function DebateRoomPage({
         </div>
 
         <div
-          className={cn("flex items-center gap-1.5 rounded-xl border px-3 py-1.5 transition-all cursor-pointer", timerBg)}
-          onClick={() => setTimerRunning((v) => !v)}
+          className={cn("flex items-center gap-1.5 rounded-xl border px-3 py-1.5 transition-all cursor-pointer", timerBg, gamePhase !== "debate" && "opacity-50 cursor-not-allowed")}
+          onClick={() => { if (gamePhase === "debate") setTimerRunning((v) => !v); }}
         >
           <Timer className={cn("h-3.5 w-3.5", timerColor)} />
           <span className={cn("text-sm font-mono font-bold", timerColor)}>{formatTime(seconds)}</span>
         </div>
 
-        {seconds === 0 && round < MAX_ROUNDS && (
+        {seconds === 0 && round < MAX_ROUNDS && gamePhase === "debate" && (
           <button
             onClick={nextRound}
             className="flex items-center gap-1.5 rounded-xl bg-violet-600 hover:bg-violet-500 px-3 py-1.5 text-xs font-bold text-white transition-colors"
@@ -423,7 +493,7 @@ export function DebateRoomPage({
             Next Round
           </button>
         )}
-        {seconds === 0 && round >= MAX_ROUNDS && (
+        {seconds === 0 && round >= MAX_ROUNDS && gamePhase === "debate" && (
           <button
             onClick={() => endDebate("completed")}
             className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition-colors"
@@ -448,7 +518,7 @@ export function DebateRoomPage({
       </div>
 
       {/* ── Main 3-column arena ──────────────────────────────────────── */}
-      <main className="flex flex-1 gap-0 overflow-hidden">
+      <main className="flex flex-1 gap-0 overflow-hidden relative">
 
         {/* LEFT: PRO player */}
         <PlayerColumn
@@ -460,7 +530,7 @@ export function DebateRoomPage({
           onInputChange={setMyInput}
           onSend={handleMySend}
           messagesEndRef={myMessagesEndRef}
-          disabled={myInput.trim().length === 0 || isModerating || isWarningOpen || isBlockedOpen}
+          disabled={gamePhase !== "debate" || myInput.trim().length === 0 || isModerating || isWarningOpen || isBlockedOpen}
           isTyping={myTyping}
           isModerating={isModerating}
           isRegenerateVisible={isRegenerateVisible}
@@ -468,6 +538,9 @@ export function DebateRoomPage({
             setIsRegenerateVisible(false);
             executeSend(pendingMessage, 0, currentModerationResult?.qualityFlags);
           }}
+          phase={gamePhase}
+          isReady={myReady}
+          onReadyToggle={() => setMyReady(r => !r)}
         />
 
         {/* CENTER: Resource + scoreboard */}
@@ -482,7 +555,7 @@ export function DebateRoomPage({
 
           <div className="p-3 border-b border-white/8">
             <p className="mb-2 text-[9px] font-bold uppercase tracking-[0.18em] text-white/30">Reference Source</p>
-            <div className="rounded-xl overflow-hidden ring-1 ring-white/10 shadow-2xl shadow-black/60">
+            <div className="rounded-xl overflow-hidden ring-1 ring-white/10 shadow-2xl shadow-black/60 relative z-30">
               <YouTubePlayer url={challenge.videoUrl} title={challenge.topic} />
             </div>
           </div>
@@ -516,7 +589,6 @@ export function DebateRoomPage({
             </div>
           </div>
 
-          {/* AI Judge Panel — receives dynamic comments */}
           <JudgePanel
             proScore={proScore}
             conScore={conScore}
@@ -561,8 +633,10 @@ export function DebateRoomPage({
             setOppInput("");
           }}
           messagesEndRef={oppMessagesEndRef}
-          disabled={oppInput.trim().length === 0}
+          disabled={gamePhase !== "debate" || oppInput.trim().length === 0}
           isTyping={oppTyping}
+          phase={gamePhase}
+          isReady={oppReady}
         />
       </main>
 
@@ -593,6 +667,7 @@ export function DebateRoomPage({
           if (!open) { setIsBlockedOpen(false); setBlockedResult(null); setMyInput(""); }
         }}
       >
+        {/* Dialog content as before */}
         <DialogContent className="bg-[#0a0a18] border border-rose-500/30">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-rose-400">
@@ -630,6 +705,7 @@ export function DebateRoomPage({
       {/* ── Warning Dialog ───────────────────────────────────────────── */}
       <Dialog open={isWarningOpen} onOpenChange={setIsWarningOpen}>
         <DialogContent className="bg-[#0a0a18] border border-amber-500/20">
+          {/* Dialog content as before */}
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-amber-400">
               <AlertCircle className="h-5 w-5" />
@@ -721,7 +797,6 @@ interface JudgePanelProps {
   proScore: number;
   conScore: number;
   totalMessages: number;
-  /** Dynamic comments generated by Gemini for the specific debate topic */
   judgeComments: {
     neutral: string[];
     proLead: string[];
@@ -809,6 +884,9 @@ interface PlayerColumnProps {
   isModerating?: boolean;
   isRegenerateVisible?: boolean;
   onRegenerate?: () => void;
+  phase?: GamePhase;
+  isReady?: boolean;
+  onReadyToggle?: () => void;
 }
 
 function PlayerColumn({
@@ -825,6 +903,9 @@ function PlayerColumn({
   isModerating = false,
   isRegenerateVisible = false,
   onRegenerate,
+  phase,
+  isReady,
+  onReadyToggle,
 }: PlayerColumnProps) {
   const isPro   = role === "pro";
   const accent  = isPro
@@ -858,7 +939,7 @@ function PlayerColumn({
     <div className="flex flex-1 flex-col border-r border-white/8 last:border-r-0 min-w-0 h-full overflow-hidden">
 
       {/* Player header */}
-      <div className={cn("flex items-center gap-3 px-4 py-3 border-b border-white/8", accent.bg)}>
+      <div className={cn("flex items-center gap-3 px-4 py-3 border-b border-white/8 z-30", accent.bg)}>
         <div className={cn("relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ring-1", accent.ring, isPro ? "bg-violet-500/20" : "bg-rose-500/20")}>
           <Crown className={cn("h-5 w-5", accent.text)} />
           <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3">
@@ -884,118 +965,168 @@ function PlayerColumn({
         </div>
       </div>
 
-      {/* Argument feed */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-3">
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-8">
-            <Sparkles className={cn("h-8 w-8 opacity-20", accent.text)} />
-            <p className="text-xs text-white/20">
-              {isMe ? "Make your opening argument…" : "Waiting for response…"}
-            </p>
-          </div>
-        )}
-
-        {messages.map((msg) => (
-          <div key={msg.id} className="flex flex-col gap-1">
-            <div className={cn("rounded-2xl border px-3 py-2.5 text-sm leading-relaxed text-white/85", accent.bubble)}>
-              {msg.text}
+      <div className="relative flex-1 flex flex-col overflow-hidden">
+        {/* Argument feed */}
+        <div className="flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-3">
+          {messages.length === 0 && phase !== "prep" && phase !== "countdown" && (
+            <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-8">
+              <Sparkles className={cn("h-8 w-8 opacity-20", accent.text)} />
+              <p className="text-xs text-white/20">
+                {isMe ? "Make your opening argument…" : "Waiting for response…"}
+              </p>
             </div>
-            <div className="flex items-center gap-2 px-1">
-              <span className="text-[10px] text-white/25">
-                {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
-              <div className="flex gap-0.5 items-center ml-auto">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "h-1 w-1 rounded-full transition-colors",
-                      i < Math.round((msg.score ?? 0) / 2)
-                        ? isPro ? "bg-violet-400" : "bg-rose-400"
-                        : "bg-white/10",
-                    )}
-                  />
-                ))}
-                <span className={cn("ml-1 text-[9px] font-bold", accent.text)}>{msg.score}/10</span>
+          )}
+
+          {messages.map((msg) => (
+            <div key={msg.id} className="flex flex-col gap-1">
+              <div className={cn("rounded-2xl border px-3 py-2.5 text-sm leading-relaxed text-white/85", accent.bubble)}>
+                {msg.text}
+              </div>
+              <div className="flex items-center gap-2 px-1">
+                <span className="text-[10px] text-white/25">
+                  {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <div className="flex gap-0.5 items-center ml-auto">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        "h-1 w-1 rounded-full transition-colors",
+                        i < Math.round((msg.score ?? 0) / 2)
+                          ? isPro ? "bg-violet-400" : "bg-rose-400"
+                          : "bg-white/10",
+                      )}
+                    />
+                  ))}
+                  <span className={cn("ml-1 text-[9px] font-bold", accent.text)}>{msg.score}/10</span>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
 
-        {isTyping && (
-          <div className={cn("rounded-2xl border px-3 py-2.5 self-start", accent.bubble)}>
-            <div className="flex gap-1 items-center h-4">
-              {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className={cn("h-2 w-2 rounded-full animate-bounce", isPro ? "bg-violet-400" : "bg-rose-400")}
-                  style={{ animationDelay: `${i * 150}ms` }}
-                />
-              ))}
+          {isTyping && (
+            <div className={cn("rounded-2xl border px-3 py-2.5 self-start", accent.bubble)}>
+              <div className="flex gap-1 items-center h-4">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className={cn("h-2 w-2 rounded-full animate-bounce", isPro ? "bg-violet-400" : "bg-rose-400")}
+                    style={{ animationDelay: `${i * 150}ms` }}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {isRegenerateVisible && (
-          <div className="flex items-center justify-center py-2">
-            <Button
-              onClick={onRegenerate}
-              variant="outline"
-              size="sm"
-              className="gap-2 bg-white/5 border-white/10 hover:bg-white/10 text-white/70"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Regenerate Response
-            </Button>
-          </div>
-        )}
+          {isRegenerateVisible && (
+            <div className="flex items-center justify-center py-2">
+              <Button
+                onClick={onRegenerate}
+                variant="outline"
+                size="sm"
+                className="gap-2 bg-white/5 border-white/10 hover:bg-white/10 text-white/70"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Regenerate Response
+              </Button>
+            </div>
+          )}
 
-        <div ref={messagesEndRef} />
-      </div>
-
-      <button
-        onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })}
-        className="mx-3 mb-1 flex items-center justify-center gap-1 rounded-xl py-1 text-[10px] text-white/20 hover:text-white/40 transition-colors"
-      >
-        <ChevronDown className="h-3 w-3" />
-      </button>
-
-      {/* Input area */}
-      <div className="border-t border-white/8 p-3 flex flex-col gap-2">
-        <div className={cn(
-          "relative rounded-xl border transition-all",
-          input.trim() ? `${accent.border} ${accent.bg}` : "border-white/10 bg-white/3",
-        )}>
-          <textarea
-            value={input}
-            onChange={(e) => onInputChange(e.target.value)}
-            onKeyDown={handleKey}
-            rows={3}
-            placeholder={isMe ? "Type your argument… (Enter to send)" : `${name} is responding…`}
-            readOnly={!isMe || isModerating}
-            disabled={isModerating}
-            className="w-full resize-none bg-transparent px-3 pt-2.5 pb-8 text-sm text-white/90 placeholder-white/20 outline-none leading-relaxed disabled:opacity-50"
-          />
-          <span className="absolute bottom-2 left-3 text-[9px] text-white/20">
-            {input.length} chars
-          </span>
-          <button
-            onClick={onSend}
-            disabled={disabled || isModerating}
-            className={cn(
-              "absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-lg transition-all shadow-md",
-              !disabled && !isModerating
-                ? `${accent.btn} text-white`
-                : "bg-white/5 text-white/20 cursor-not-allowed",
-            )}
-          >
-            {isModerating ? (
-              <Spinner className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Send className="h-3.5 w-3.5" />
-            )}
-          </button>
+          <div ref={messagesEndRef} />
         </div>
+
+        <button
+          onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })}
+          className="mx-3 mb-1 flex items-center justify-center gap-1 rounded-xl py-1 text-[10px] text-white/20 hover:text-white/40 transition-colors"
+        >
+          <ChevronDown className="h-3 w-3" />
+        </button>
+
+        {/* Input area */}
+        <div className="border-t border-white/8 p-3 flex flex-col gap-2 z-10">
+          <div className={cn(
+            "relative rounded-xl border transition-all",
+            input.trim() ? `${accent.border} ${accent.bg}` : "border-white/10 bg-white/3",
+          )}>
+            <textarea
+              value={input}
+              onChange={(e) => onInputChange(e.target.value)}
+              onKeyDown={handleKey}
+              rows={3}
+              placeholder={isMe ? "Type your argument… (Enter to send)" : `${name} is responding…`}
+              readOnly={!isMe || isModerating || phase !== "debate"}
+              disabled={disabled || isModerating}
+              className="w-full resize-none bg-transparent px-3 pt-2.5 pb-8 text-sm text-white/90 placeholder-white/20 outline-none leading-relaxed disabled:opacity-50"
+            />
+            <span className="absolute bottom-2 left-3 text-[9px] text-white/20">
+              {input.length} chars
+            </span>
+            <button
+              onClick={onSend}
+              disabled={disabled || isModerating}
+              className={cn(
+                "absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-lg transition-all shadow-md",
+                !disabled && !isModerating
+                  ? `${accent.btn} text-white`
+                  : "bg-white/5 text-white/20 cursor-not-allowed",
+              )}
+            >
+              {isModerating ? (
+                <Spinner className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* ── Preparation Phase Overlay ─────────────────────────────────────── */}
+        {phase === "prep" && (
+          <div className="absolute inset-0 z-20 bg-[#0a0a18]/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center border-t border-white/5">
+            {isMe ? (
+              <>
+                <Play className={cn("h-12 w-12 mb-4 opacity-80", accent.text)} />
+                <h3 className="text-xl font-bold text-white mb-2">Preparation Phase</h3>
+                <p className="text-sm text-white/70 mb-6 max-w-[250px]">
+                  Watch the video context and prepare your opening arguments.
+                </p>
+                <Button
+                  onClick={onReadyToggle}
+                  className={cn(
+                    "w-full max-w-[200px] transition-all shadow-lg",
+                    isReady ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20" : accent.btn
+                  )}
+                >
+                  {isReady ? (
+                    <span className="flex items-center gap-2"><CheckCircle className="h-4 w-4" /> Ready</span>
+                  ) : (
+                    "I'm Ready"
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="relative">
+                   {isReady ? (
+                     <CheckCircle className="h-12 w-12 mb-4 text-emerald-400" />
+                   ) : (
+                     <Spinner className={cn("h-12 w-12 mb-4", accent.text)} />
+                   )}
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">{name}</h3>
+                <p className="text-sm text-white/70 mb-6">
+                  {isReady ? "Opponent is ready." : "Reviewing the material..."}
+                </p>
+                <Badge variant="outline" className={cn(
+                  "px-4 py-1.5 text-xs",
+                  isReady ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                )}>
+                  {isReady ? "Ready" : "Preparing..."}
+                </Badge>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
