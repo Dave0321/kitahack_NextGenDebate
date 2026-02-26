@@ -104,8 +104,18 @@ export function DebateRoomPage({
     const myRole: "pro" | "con" = userRole ?? (isPlayerOne ? "pro" : "con");
     const oppRole: "pro" | "con" = myRole === "pro" ? "con" : "pro";
 
+    // Determine mode: player vs AI or player vs player.
+    // - AI Training sessions use ids like "ai-..."
+    // - Explore Topics → "Debate AI" uses synthetic ids like "card-..."
+    // - Live & Upcoming matches use "ch-..." and are player vs player.
+    const isAIDebate =
+        challenge.id.startsWith("ai-") ||
+        challenge.id.startsWith("card-") ||
+        challenge.acceptedBy === "AI Debater";
+
     // ── Game State & Phases ─────────────────────────────────────────────────
-    const [gamePhase, setGamePhase] = useState<GamePhase>("prep");
+    // AI debates start in a preparation phase; player-vs-player starts directly in debate.
+    const [gamePhase, setGamePhase] = useState<GamePhase>(isAIDebate ? "prep" : "debate");
     const [myReady, setMyReady] = useState(false);
     const [oppReady, setOppReady] = useState(false);
     const [countdown, setCountdown] = useState(3);
@@ -168,28 +178,40 @@ export function DebateRoomPage({
             ? "bg-amber-500/10 border-amber-500/20"
             : "bg-rose-500/10 border-rose-500/20 animate-pulse";
 
-    // ── Pre-Game & Countdown Logic ──────────────────────────────────────────
+    // ── Pre-Game & Countdown Logic (AI-only) ────────────────────────────────
 
-    // Simulate AI opponent getting ready
+    // In player-vs-player mode we skip the prep/countdown ceremony
+    // and immediately allow both sides to debate with a running timer.
     useEffect(() => {
+        if (!isAIDebate) {
+            setGamePhase("debate");
+            setTimerRunning(true);
+        }
+    }, [isAIDebate]);
+
+    // Simulate AI opponent getting ready (AI mode only)
+    useEffect(() => {
+        if (!isAIDebate) return;
         if (gamePhase === "prep") {
             const timer = setTimeout(() => {
                 setOppReady(true);
             }, 3000 + Math.random() * 4000); // 3-7 seconds delay
             return () => clearTimeout(timer);
         }
-    }, [gamePhase]);
+    }, [gamePhase, isAIDebate]);
 
-    // Transition to countdown when both are ready
+    // Transition to countdown when both are ready (AI mode only)
     useEffect(() => {
+        if (!isAIDebate) return;
         if (gamePhase === "prep" && myReady && oppReady) {
             setGamePhase("countdown");
             setCountdown(3);
         }
-    }, [gamePhase, myReady, oppReady]);
+    }, [gamePhase, myReady, oppReady, isAIDebate]);
 
-    // Handle countdown animation and sounds
+    // Handle countdown animation and sounds (AI mode only)
     useEffect(() => {
+        if (!isAIDebate) return;
         if (gamePhase === "countdown") {
             if (countdown > 0) {
                 playBeep(440, 'square', 0.2, 0.05); // Short tick
@@ -204,7 +226,7 @@ export function DebateRoomPage({
                 return () => clearTimeout(timer);
             }
         }
-    }, [gamePhase, countdown, playBeep]);
+    }, [gamePhase, countdown, playBeep, isAIDebate]);
 
     // ── Messages ─────────────────────────────────────────────────────────────
     const [messages, setMessages] = useState<Message[]>([]);
@@ -310,6 +332,18 @@ export function DebateRoomPage({
         sendMessage(myRole, myName, content, flags);
         setMyInput("");
 
+        // In pure player-vs-player mode we stop here — the other player will
+        // see the message on their own screen and can reply with their turn.
+        if (!isAIDebate) {
+            if (currentTips.length > 0) {
+                const tip = currentTips[Math.floor(Math.random() * currentTips.length)];
+                setActiveTip(tip);
+                setTimeout(() => setActiveTip(null), 5000);
+            }
+            return;
+        }
+
+        // Player vs AI: generate AI reply on the opposing side.
         setOppTyping(true);
         if (oppTimerRef.current) clearTimeout(oppTimerRef.current);
 
