@@ -115,6 +115,7 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole, oppon
     const opponentName = isPlayerOne ? (challenge.acceptedBy ?? "Challenger") : challenge.raisedBy;
     const myRole: "pro" | "con" = userRole ?? (isPlayerOne ? "pro" : "con");
     const oppRole: "pro" | "con" = myRole === "pro" ? "con" : "pro";
+    const [activeOpponentCharacter, setActiveOpponentCharacter] = useState<"logician" | "activist">(opponentCharacter);
 
     // Timer
     const [seconds, setSeconds] = useState(ROUND_SECONDS);
@@ -147,7 +148,7 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole, oppon
     const [oppTyping, setOppTyping] = useState(false);
     const [activeTip, setActiveTip] = useState<string | null>(null);
 
-    // Moderation states
+    // Moderation / end-of-game states
     const [pendingMessage, setPendingMessage] = useState<string>('');
     const [isWarningOpen, setIsWarningOpen] = useState<boolean>(false);
     const [isBlockedOpen, setIsBlockedOpen] = useState<boolean>(false);
@@ -157,11 +158,13 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole, oppon
     const [currentModerationResult, setCurrentModerationResult] = useState<ModerationResult | null>(null);
     const [blockedResult, setBlockedResult] = useState<ModerationResult | null>(null);
     const [isSummaryOpen, setIsSummaryOpen] = useState<boolean>(false);
-    const [debateEndReason, setDebateEndReason] = useState<"completed" | "forfeit">("completed");
+    const [isGameOver, setIsGameOver] = useState<boolean>(false);
+    const [debateEndReason, setDebateEndReason] = useState<"completed" | "forfeit" | "violations">("completed");
 
     const myMessagesEndRef = useRef<HTMLDivElement>(null);
     const oppMessagesEndRef = useRef<HTMLDivElement>(null);
     const oppTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const apiKeyInvalidToastShownRef = useRef(false);
 
     const myMessages = messages.filter((m) => m.player === myRole);
     const oppMessages = messages.filter((m) => m.player === oppRole);
@@ -190,74 +193,106 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole, oppon
     );
 
     function handleGameOver() {
-        // TODO: Implement full game-over UI and end-state screen
         console.log('Game over — user reached score 0 due to rule violations');
+        endDebate("violations");
     }
 
-    const endDebate = (reason: "completed" | "forfeit") => {
+    const endDebate = (reason: "completed" | "forfeit" | "violations") => {
         setTimerRunning(false);
         setDebateEndReason(reason);
+        setIsGameOver(true);
         setIsSummaryOpen(true);
     };
 
     async function getAIResponse(userMessage: string): Promise<string> {
         const opponentSide: "pro" | "con" = myRole === "pro" ? "con" : "pro";
-        const basePrompt = opponentCharacter === "logician" ? LOGICIAN_PROMPT : ACTIVIST_PROMPT;
+        const basePrompt = activeOpponentCharacter === "logician" ? LOGICIAN_PROMPT : ACTIVIST_PROMPT;
         const systemPrompt = basePrompt
             .replace("{side}", opponentSide)
             .replace("{topic}", challenge.topic);
 
-        try {
-            const apiKey = process.env.NEXT_PUBLIC_GEMINI_KEY;
-            if (!apiKey) {
-                throw new Error("Missing Gemini API key");
-            }
-
-            const mappedHistory: DebateMessage[] = [
-                ...messages.map((m) => ({
-                    role: (m.player === myRole ? "user" : "assistant") as DebateMessage["role"],
-                    content: m.text,
-                    flags: m.flags,
-                })),
-                { role: "user" as const, content: userMessage },
-            ];
-
-            const recent = mappedHistory.slice(-6);
-            const contents = recent.map((m) => ({
-                role: m.role === "user" ? ("user" as const) : ("model" as const),
-                parts: [{ text: m.content }],
-            }));
-
-            const client = new GoogleGenerativeAI(apiKey);
-            const model = client.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-            const geminiCall = model.generateContent({
-                systemInstruction: systemPrompt,
-                contents,
-            });
-
-            const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("Gemini response timeout")), 8000)
-            );
-
-            const result = await Promise.race([geminiCall, timeoutPromise]);
-            return result.response.text().trim();
-        } catch {
-            // TODO: Replace fallback replies with live character-specific Gemini responses when quota is available
-            const fallbacks = opponentCharacter === "logician" ? LOGICIAN_FALLBACKS : ACTIVIST_FALLBACKS;
+        const apiKey = process.env.NEXT_PUBLIC_GEMINI_KEY;
+        if (!apiKey) {
+            const fallbacks = activeOpponentCharacter === "logician" ? LOGICIAN_FALLBACKS : ACTIVIST_FALLBACKS;
             return fallbacks[Math.floor(Math.random() * fallbacks.length)];
         }
+
+        const mappedHistory: DebateMessage[] = [
+            ...messages.map((m) => ({
+                role: (m.player === myRole ? "user" : "assistant") as DebateMessage["role"],
+                content: m.text,
+                flags: m.flags,
+            })),
+            { role: "user" as const, content: userMessage },
+        ];
+
+        const recent = mappedHistory.slice(-6);
+        const contents = recent.map((m) => ({
+            role: m.role === "user" ? ("user" as const) : ("model" as const),
+            parts: [{ text: m.content }],
+        }));
+
+        const modelIds = ["gemini-2.0-flash", "gemini-1.5-flash"] as const;
+        let lastError: unknown = null;
+
+        for (const modelId of modelIds) {
+            try {
+                const client = new GoogleGenerativeAI(apiKey);
+                const model = client.getGenerativeModel({ model: modelId });
+
+                const geminiCall = model.generateContent({
+                    systemInstruction: systemPrompt,
+                    contents,
+                });
+
+                const timeoutPromise = new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error("Gemini response timeout")), 8000)
+                );
+
+                const result = await Promise.race([geminiCall, timeoutPromise]);
+                return result.response.text().trim();
+            } catch (err) {
+                lastError = err;
+                console.warn(`Gemini opponent failed with model ${modelId}, trying next`, err);
+            }
+        }
+
+        const isApiKeyInvalid =
+            lastError &&
+            (String((lastError as { message?: string }).message ?? "").includes("API key expired") ||
+                String((lastError as { message?: string }).message ?? "").includes("API_KEY_INVALID"));
+        if (isApiKeyInvalid && !apiKeyInvalidToastShownRef.current) {
+            apiKeyInvalidToastShownRef.current = true;
+            toast.error("Gemini API key expired or invalid. Create a new key at aistudio.google.com/apikey, set NEXT_PUBLIC_GEMINI_KEY in .env.local, then restart the dev server.", {
+                duration: 10000,
+            });
+        }
+
+        const fallbacks = activeOpponentCharacter === "logician" ? LOGICIAN_FALLBACKS : ACTIVIST_FALLBACKS;
+        return fallbacks[Math.floor(Math.random() * fallbacks.length)];
     }
 
     function executeSend(content: string, penalty: number, flags?: QualityFlag[]) {
-        // Check if user score would drop to 0 or below
-        if (userScore + penalty <= 0) {
-            handleGameOver();
+        if (isGameOver) {
             return;
         }
 
-        // Apply penalty if any
-        setUserScore((prev) => prev + penalty);
+        let endedFromPenalty = false;
+
+        // Apply penalty if any and check for game over
+        setUserScore((prev) => {
+            const updated = prev + penalty;
+            if (updated <= 0) {
+                endedFromPenalty = true;
+                return 0;
+            }
+            return updated;
+        });
+
+        if (endedFromPenalty) {
+            handleGameOver();
+            return;
+        }
 
         // Send user message with any soft-rule flags attached
         sendMessage(myRole, myName, content, flags);
@@ -468,6 +503,16 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole, oppon
                 )}
             </header>
 
+            {/* Latency status bar */}
+            {(isModerating || oppTyping) && (
+                <div className="flex items-center gap-2 px-4 py-1 border-b border-white/10 bg-[#101026] text-xs text-white/70">
+                    <Spinner className="h-3 w-3 animate-spin text-violet-300" />
+                    <span>
+                        {isModerating ? "Moderator checking your argument…" : "Opponent responding…"}
+                    </span>
+                </div>
+            )}
+
             {/* ── AI tip toast ─────────────────────────────────────────────────── */}
             <div
                 className={cn(
@@ -494,9 +539,10 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole, oppon
                     onInputChange={setMyInput}
                     onSend={handleMySend}
                     messagesEndRef={myMessagesEndRef}
-                    disabled={myInput.trim().length === 0 || isModerating || isWarningOpen || isBlockedOpen}
+                    disabled={myInput.trim().length === 0 || isModerating || isWarningOpen || isBlockedOpen || isGameOver || oppTyping}
                     isTyping={myTyping}
                     isModerating={isModerating}
+                    isGameOver={isGameOver}
                     isRegenerateVisible={isRegenerateVisible}
                     onRegenerate={() => {
                         setIsRegenerateVisible(false);
@@ -507,12 +553,43 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole, oppon
                 {/* ── CENTER: Resource + scoreboard ────────────────────────────── */}
                 <div className="hidden lg:flex flex-col w-[36%] min-w-0 border-x border-white/8 bg-[#0a0a18] overflow-y-auto">
                     {/* VS header */}
-                    <div className="flex items-center justify-center gap-3 py-3 border-b border-white/8">
-                        <span className="text-xs font-bold text-violet-400 tracking-widest">PRO</span>
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 shadow-lg shadow-violet-500/40">
-                            <Swords className="h-3.5 w-3.5 text-white" />
+                    <div className="flex items-center justify-between gap-3 py-3 border-b border-white/8 px-3">
+                        <div className="flex items-center gap-3">
+                            <span className="text-xs font-bold text-violet-400 tracking-widest">PRO</span>
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 shadow-lg shadow-violet-500/40">
+                                <Swords className="h-3.5 w-3.5 text-white" />
+                            </div>
+                            <span className="text-xs font-bold text-rose-400 tracking-widest">CON</span>
                         </div>
-                        <span className="text-xs font-bold text-rose-400 tracking-widest">CON</span>
+                        {/* Opponent style toggle */}
+                        <div className="inline-flex rounded-full border border-white/12 bg-white/5 overflow-hidden text-[10px] font-semibold">
+                            <button
+                                type="button"
+                                onClick={() => setActiveOpponentCharacter("logician")}
+                                className={cn(
+                                    "px-2 py-1 flex items-center gap-1 transition-colors",
+                                    activeOpponentCharacter === "logician"
+                                        ? "bg-violet-600 text-white"
+                                        : "text-white/60 hover:bg-white/10"
+                                )}
+                            >
+                                <Scale className="h-3 w-3" />
+                                Logician
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setActiveOpponentCharacter("activist")}
+                                className={cn(
+                                    "px-2 py-1 flex items-center gap-1 transition-colors",
+                                    activeOpponentCharacter === "activist"
+                                        ? "bg-rose-600 text-white"
+                                        : "text-white/60 hover:bg-white/10"
+                                )}
+                            >
+                                <Zap className="h-3 w-3" />
+                                Activist
+                            </button>
+                        </div>
                     </div>
 
                     {/* Video */}
@@ -600,8 +677,9 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole, oppon
                         setOppInput("");
                     }}
                     messagesEndRef={oppMessagesEndRef}
-                    disabled={oppInput.trim().length === 0}
+                    disabled={oppInput.trim().length === 0 || isGameOver}
                     isTyping={oppTyping}
+                    isGameOver={isGameOver}
                 />
             </main>
 
@@ -731,15 +809,22 @@ export function DebateRoomPage({ challenge, currentUser, onExit, userRole, oppon
                 <DialogContent className="bg-[#07070e] border border-violet-500/30 max-w-lg">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2 text-white">
-                            {debateEndReason === "completed" ? (
+                            {debateEndReason === "completed" && (
                                 <>
                                     <span className="text-emerald-400 text-lg">🏆</span>
                                     <span className="text-emerald-300">Debate Complete</span>
                                 </>
-                            ) : (
+                            )}
+                            {debateEndReason === "forfeit" && (
                                 <>
                                     <span className="text-rose-400 text-lg">🏳️</span>
                                     <span className="text-rose-300">Debate Forfeited</span>
+                                </>
+                            )}
+                            {debateEndReason === "violations" && (
+                                <>
+                                    <span className="text-rose-400 text-lg">⚠️</span>
+                                    <span className="text-rose-300">Debate Concluded — Rule Violations</span>
                                 </>
                             )}
                         </DialogTitle>
@@ -995,6 +1080,7 @@ interface PlayerColumnProps {
     disabled: boolean;
     isTyping?: boolean;
     isModerating?: boolean;
+    isGameOver?: boolean;
     isRegenerateVisible?: boolean;
     onRegenerate?: () => void;
 }
@@ -1011,6 +1097,7 @@ function PlayerColumn({
     disabled,
     isTyping,
     isModerating = false,
+    isGameOver = false,
     isRegenerateVisible = false,
     onRegenerate,
 }: PlayerColumnProps) {
@@ -1145,8 +1232,8 @@ function PlayerColumn({
                         onKeyDown={handleKey}
                         rows={3}
                         placeholder={isMe ? "Type your argument… (Enter to send)" : `${name} is responding…`}
-                        readOnly={!isMe || isModerating}
-                        disabled={isModerating}
+                        readOnly={!isMe || isModerating || isGameOver}
+                        disabled={isModerating || isGameOver}
                         className="w-full resize-none bg-transparent px-3 pt-2.5 pb-8 text-sm text-white/90 placeholder-white/20 outline-none leading-relaxed disabled:opacity-50"
                     />
                     {/* Char count */}
@@ -1155,10 +1242,10 @@ function PlayerColumn({
                     </span>
                     <button
                         onClick={onSend}
-                        disabled={disabled || isModerating}
+                        disabled={disabled || isModerating || isGameOver}
                         className={cn(
                             "absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-lg transition-all shadow-md",
-                            !disabled && !isModerating
+                            !disabled && !isModerating && !isGameOver
                                 ? `${accent.btn} text-white`
                                 : "bg-white/5 text-white/20 cursor-not-allowed"
                         )}

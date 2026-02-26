@@ -119,15 +119,12 @@ export class DebateModerator {
 
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_KEY
 
-    try {
-      if (!apiKey) {
-        throw new Error('Missing Gemini API key')
-      }
+    if (!apiKey) {
+      console.warn('Missing NEXT_PUBLIC_GEMINI_KEY, using fallback')
+      return this.fallbackCheck(message, context)
+    }
 
-      const client = new GoogleGenerativeAI(apiKey)
-      const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' })
-
-      const systemPrompt = `You are a strict debate moderation system. Analyze the user's message and return ONLY a valid JSON object with no markdown, no explanation, no extra text.
+    const systemPrompt = `You are a strict debate moderation system. Analyze the user's message and return ONLY a valid JSON object with no markdown, no explanation, no extra text.
 
 The JSON must follow this exact structure:
 {
@@ -153,57 +150,97 @@ Rules:
 
 Return ONLY the JSON. No markdown. No backticks. No explanation.`
 
-      const timeoutMs = 5000
+    const timeoutMs = 5000
+    const modelIds = ['gemini-2.0-flash', 'gemini-1.5-flash'] as const
 
-      const geminiCall = model.generateContent({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: `User message: "${message}"` }],
-          },
-        ],
-        systemInstruction: systemPrompt,
-      })
+    for (const modelId of modelIds) {
+      try {
+        const client = new GoogleGenerativeAI(apiKey)
+        const model = client.getGenerativeModel({ model: modelId })
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Gemini moderation timeout')), timeoutMs)
-      )
+        const geminiCall = model.generateContent({
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: `User message: "${message}"` }],
+            },
+          ],
+          systemInstruction: systemPrompt,
+        })
 
-      const result = await Promise.race([geminiCall, timeoutPromise])
-      let text = result.response.text()
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Gemini moderation timeout')), timeoutMs)
+        )
+
+        const result = await Promise.race([geminiCall, timeoutPromise])
+        let text = result.response.text()
 
       // Strip any markdown backticks from the response before parsing
       text = text.replace(/```/g, '').trim()
 
       type GeminiResponse = {
         verdict: ModerationResult['verdict']
-        violationType: string
-        feedback: string
-        suggestedCorrection: string
-        scoreImpact: number
-        qualityFlags: unknown
+        violationType?: string
+        feedback?: string
+        suggestedCorrection?: string
+        scoreImpact?: number
+        qualityFlags?: unknown
       }
 
-      const parsed = JSON.parse(text) as GeminiResponse
+      let parsed: GeminiResponse
+
+      try {
+        parsed = JSON.parse(text) as GeminiResponse
+      } catch (parseError) {
+        console.warn(
+          'Gemini moderation returned non-JSON payload, defaulting to fallback layer',
+          parseError
+        )
+        throw parseError
+      }
+
+      if (!parsed || typeof parsed.verdict !== 'string') {
+        console.warn(
+          'Gemini moderation response missing verdict key, defaulting to safe pass'
+        )
+
+        return {
+          verdict: 'pass',
+          violationType: '',
+          feedback: '',
+          suggestedCorrection: '',
+          scoreImpact: 0,
+          qualityFlags: [],
+        }
+      }
+
+      const normalizedVerdict: ModerationResult['verdict'] =
+        parsed.verdict === 'warn' || parsed.verdict === 'block' || parsed.verdict === 'pass'
+          ? parsed.verdict
+          : 'pass'
 
       const scoreImpact =
-        parsed.verdict === 'warn'
+        normalizedVerdict === 'warn'
           ? -10
           : 0
 
       const moderationResult: ModerationResult = {
-        verdict: parsed.verdict,
-        violationType: parsed.violationType,
-        feedback: parsed.feedback,
-        suggestedCorrection: parsed.suggestedCorrection,
+        verdict: normalizedVerdict,
+        violationType: parsed.violationType ?? '',
+        feedback: parsed.feedback ?? '',
+        suggestedCorrection: parsed.suggestedCorrection ?? '',
         scoreImpact,
         qualityFlags: [],
       }
 
       return moderationResult
-    } catch (error) {
-      console.warn('Gemini moderation unavailable, using fallback', error)
-      return this.fallbackCheck(message, context)
+      } catch (err) {
+        console.warn(`Gemini moderation failed with model ${modelId}, trying next`, err)
+        continue
+      }
     }
+
+    console.warn('Gemini moderation unavailable for all models, using fallback')
+    return this.fallbackCheck(message, context)
   }
 }
