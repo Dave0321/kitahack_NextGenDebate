@@ -230,6 +230,34 @@ export function DebateRoomPage({
 
     // ── Messages ─────────────────────────────────────────────────────────────
     const [messages, setMessages] = useState<Message[]>([]);
+
+    // Sync messages across tabs to mock real-time chat without database
+    useEffect(() => {
+        if (isAIDebate) return;
+        const handleStorage = (e: StorageEvent) => {
+            if (e.key === `debate-messages-${challenge.id}` && e.newValue) {
+                try {
+                    const parsed = JSON.parse(e.newValue);
+                    setMessages(parsed.map((p: any) => ({ ...p, timestamp: new Date(p.timestamp) })));
+                } catch (err) { }
+            }
+        };
+        window.addEventListener("storage", handleStorage);
+        return () => window.removeEventListener("storage", handleStorage);
+    }, [challenge.id, isAIDebate]);
+
+    // Load initial messages for demo
+    useEffect(() => {
+        if (!isAIDebate && typeof window !== "undefined") {
+            const saved = localStorage.getItem(`debate-messages-${challenge.id}`);
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    setMessages(parsed.map((p: any) => ({ ...p, timestamp: new Date(p.timestamp) })));
+                } catch (err) { }
+            }
+        }
+    }, [challenge.id, isAIDebate]);
     const [myInput, setMyInput] = useState("");
     const [oppInput, setOppInput] = useState("");
     const [myTyping, setMyTyping] = useState(false);
@@ -275,10 +303,16 @@ export function DebateRoomPage({
                 score,
                 flags,
             };
-            setMessages((prev) => [...prev, msg]);
+            setMessages((prev) => {
+                const newMsgs = [...prev, msg];
+                if (!isAIDebate && typeof window !== "undefined") {
+                    localStorage.setItem(`debate-messages-${challenge.id}`, JSON.stringify(newMsgs));
+                }
+                return newMsgs;
+            });
             return msg;
         },
-        [],
+        [isAIDebate, challenge.id],
     );
 
     function handleGameOver() {
@@ -666,6 +700,7 @@ export function DebateRoomPage({
                     }}
                     messagesEndRef={oppMessagesEndRef}
                     disabled={gamePhase !== "debate" || oppInput.trim().length === 0}
+                    allowTyping={!isAIDebate}
                     isTyping={oppTyping}
                     phase={gamePhase}
                     isReady={oppReady}
@@ -919,6 +954,7 @@ interface PlayerColumnProps {
     phase?: GamePhase;
     isReady?: boolean;
     onReadyToggle?: () => void;
+    allowTyping?: boolean;
 }
 
 function PlayerColumn({
@@ -938,6 +974,7 @@ function PlayerColumn({
     phase,
     isReady,
     onReadyToggle,
+    allowTyping = false,
 }: PlayerColumnProps) {
     const isPro = role === "pro";
     const accent = isPro
@@ -960,10 +997,12 @@ function PlayerColumn({
             btn: "bg-rose-600 hover:bg-rose-500 shadow-rose-500/30",
         };
 
+    const canType = isMe || allowTyping;
+
     const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
-            if (!disabled) onSend();
+            if (!disabled && canType && !isModerating) onSend();
         }
     };
 
@@ -1085,9 +1124,9 @@ function PlayerColumn({
                             onChange={(e) => onInputChange(e.target.value)}
                             onKeyDown={handleKey}
                             rows={3}
-                            placeholder={isMe ? "Type your argument… (Enter to send)" : `${name} is responding…`}
-                            readOnly={!isMe || isModerating || phase !== "debate"}
-                            disabled={disabled || isModerating}
+                            placeholder={canType ? "Type your argument… (Enter to send)" : `${name} is responding…`}
+                            readOnly={!canType || isModerating || phase !== "debate"}
+                            disabled={!canType || isModerating || phase !== "debate"}
                             className="w-full resize-none bg-transparent px-3 pt-2.5 pb-8 text-sm text-white/90 placeholder-white/20 outline-none leading-relaxed disabled:opacity-50"
                         />
                         <span className="absolute bottom-2 left-3 text-[9px] text-white/20">

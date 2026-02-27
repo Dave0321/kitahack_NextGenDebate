@@ -150,9 +150,9 @@ export async function judgeDebate(params: JudgeParams): Promise<DebateJudgement>
     return buildFallbackJudgement(params);
   }
 
-  const safeTopic   = xmlEscape(sanitizeLabel(params.topic));
-  const safeNameA   = xmlEscape(sanitizeLabel(params.debaterAName));
-  const safeNameB   = xmlEscape(sanitizeLabel(params.debaterBName));
+  const safeTopic = xmlEscape(sanitizeLabel(params.topic));
+  const safeNameA = xmlEscape(sanitizeLabel(params.debaterAName));
+  const safeNameB = xmlEscape(sanitizeLabel(params.debaterBName));
   const transcriptXml = buildTranscriptXml(params.transcript);
 
   const userMessage = `<debate_metadata>
@@ -165,20 +165,20 @@ ${transcriptXml}
 
 Evaluate the debate above according to your system instructions and return the JSON judgement.`;
 
-  const dynamicJudgePrompt = typeof window !== "undefined" 
-    ? localStorage.getItem("admin_judge_prompt") || JUDGE_SYSTEM_PROMPT 
+  const dynamicJudgePrompt = typeof window !== "undefined"
+    ? localStorage.getItem("admin_judge_prompt") || JUDGE_SYSTEM_PROMPT
     : JUDGE_SYSTEM_PROMPT;
 
-  const dynamicJudgeTemp = typeof window !== "undefined" 
-    ? parseFloat(localStorage.getItem("admin_judge_temperature") || "0.2") 
+  const dynamicJudgeTemp = typeof window !== "undefined"
+    ? parseFloat(localStorage.getItem("admin_judge_temperature") || "0.2")
     : 0.2;
 
   try {
     const client = new GoogleGenerativeAI(apiKey);
-    const model  = client.getGenerativeModel({
-      model: "gemini-3-flash-preview",
+    const model = client.getGenerativeModel({
+      model: "gemini-2.0-flash",
       generationConfig: {
-        temperature: dynamicJudgeTemp, // Dynamic temperature
+        temperature: dynamicJudgeTemp,
         responseMimeType: "application/json",
       },
     });
@@ -193,7 +193,7 @@ Evaluate the debate above according to your system instructions and return the J
       ),
     ]);
 
-    const raw  = raceResult.response.text().trim();
+    const raw = raceResult.response.text().trim();
     const json = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
     const parsed = JSON.parse(json) as Record<string, unknown>;
 
@@ -207,7 +207,7 @@ Evaluate the debate above according to your system instructions and return the J
     const weightedA = computeWeightedTotal(rawA);
     const weightedB = computeWeightedTotal(rawB);
 
-    const DRAW_THRESHOLD = 3; 
+    const DRAW_THRESHOLD = 3;
     let winner: "A" | "B" | "draw";
     if (Math.abs(weightedA - weightedB) <= DRAW_THRESHOLD) {
       winner = "draw";
@@ -284,18 +284,18 @@ Return ONLY this JSON structure:
 Tips must be actionable coaching advice specific to this exact debate topic.
 judgeComments must sound like an impartial AI judge making real-time observations.`;
 
-  const dynamicTopicPrompt = typeof window !== "undefined" 
-    ? localStorage.getItem("admin_topic_content_prompt") || TOPIC_CONTENT_SYSTEM_PROMPT 
+  const dynamicTopicPrompt = typeof window !== "undefined"
+    ? localStorage.getItem("admin_topic_content_prompt") || TOPIC_CONTENT_SYSTEM_PROMPT
     : TOPIC_CONTENT_SYSTEM_PROMPT;
 
-  const dynamicTopicTemp = typeof window !== "undefined" 
-    ? parseFloat(localStorage.getItem("admin_topic_content_temperature") || "0.2") 
+  const dynamicTopicTemp = typeof window !== "undefined"
+    ? parseFloat(localStorage.getItem("admin_topic_content_temperature") || "0.2")
     : 0.2;
 
   try {
     const client = new GoogleGenerativeAI(apiKey);
-    const model  = client.getGenerativeModel({
-      model: "gemini-3-flash-preview",
+    const model = client.getGenerativeModel({
+      model: "gemini-2.0-flash",
       generationConfig: {
         temperature: dynamicTopicTemp,
         responseMimeType: "application/json",
@@ -308,7 +308,7 @@ judgeComments must sound like an impartial AI judge making real-time observation
         contents: [{ role: "user", parts: [{ text: userMessage }] }],
       }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("timeout")), 10_000),
+        setTimeout(() => reject(new Error("Topic content timeout after 30 s")), 30_000),
       ),
     ]);
 
@@ -338,8 +338,8 @@ judgeComments must sound like an impartial AI judge making real-time observation
 function extractRawScore(obj: Record<string, unknown>): RawScore {
   return {
     argumentStrength: clamp(obj.argumentStrength),
-    rebuttalQuality:  clamp(obj.rebuttalQuality),
-    topicRelevance:   clamp(obj.topicRelevance),
+    rebuttalQuality: clamp(obj.rebuttalQuality),
+    topicRelevance: clamp(obj.topicRelevance),
     evidenceAccuracy: clamp(obj.evidenceAccuracy),
   };
 }
@@ -349,17 +349,17 @@ function extractCharities(raw: unknown): CharityLink[] {
   return raw.slice(0, 3).map((c: unknown) => {
     const o = (c ?? {}) as Record<string, unknown>;
     return {
-      name:        String(o.name        ?? ""),
+      name: String(o.name ?? ""),
       description: String(o.description ?? ""),
-      url:         String(o.url         ?? "#"),
-      relevance:   String(o.relevance   ?? ""),
+      url: String(o.url ?? "#"),
+      relevance: String(o.relevance ?? ""),
     };
   });
 }
 
 function extractStringArray(
-  raw:      unknown,
-  maxLen:   number,
+  raw: unknown,
+  maxLen: number,
   fallback: string[] = [],
 ): string[] {
   if (!Array.isArray(raw) || raw.length === 0) return fallback;

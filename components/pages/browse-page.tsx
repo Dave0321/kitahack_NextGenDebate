@@ -426,6 +426,7 @@ export function BrowsePage({ onEnterDebateRoom }: BrowsePageProps = {}) {
                         setChallengeDetailOpen(true);
                       }}
                       onDelete={() => handleDeleteChallenge(ch.id)}
+                      onJoinInstantly={() => handleEnterRoom(ch)}
                     />
                   ))}
                 </div>
@@ -587,11 +588,13 @@ function YoutubeChallengeMiniCard({
   isOwn,
   onClick,
   onDelete,
+  onJoinInstantly,
 }: {
   challenge: YoutubeChallenge;
   isOwn: boolean;
   onClick: () => void;
   onDelete: () => void;
+  onJoinInstantly?: () => void;
 }) {
   const thumbnail = getYouTubeThumbnail(challenge.videoUrl, "medium");
 
@@ -641,6 +644,20 @@ function YoutubeChallengeMiniCard({
             {cfg.label}
           </span>
         </div>
+
+        {/* Join Instantly button — visible for open/live challenges raised by others */}
+        {!isOwn && (challenge.status === "open" || challenge.status === "live") && onJoinInstantly && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onJoinInstantly();
+            }}
+            className="mt-2 w-full rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-3 py-2 text-xs font-bold text-white shadow-md shadow-violet-500/20 transition-all hover:from-violet-500 hover:to-fuchsia-500 hover:shadow-violet-500/40 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-1.5"
+          >
+            <Zap className="h-3 w-3" />
+            Join Instantly
+          </button>
+        )}
       </div>
 
       {/* Delete button if owned */}

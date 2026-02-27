@@ -293,6 +293,17 @@ export function ChallengeDetailModal({
                                         </Button>
                                     )}
 
+                                    {/* Join Instantly — for non-own open challenges */}
+                                    {canAccept && (
+                                        <Button
+                                            onClick={() => onEnterRoom(challenge)}
+                                            className="w-full bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white border-0 shadow-lg shadow-emerald-500/20 font-bold"
+                                        >
+                                            <Zap className="h-4 w-4 mr-2" />
+                                            Join Instantly
+                                        </Button>
+                                    )}
+
                                     {canEnter && (
                                         <Button
                                             onClick={() => onEnterRoom(challenge)}
@@ -305,8 +316,18 @@ export function ChallengeDetailModal({
                                     )}
 
                                     {isOwn && challenge.status === "open" && (
-                                        <div className="flex items-center justify-center rounded-xl bg-white/5 border border-white/10 text-white/30 text-xs font-medium py-2.5">
-                                            Awaiting Challenger…
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex items-center justify-center rounded-xl bg-white/5 border border-white/10 text-white/30 text-xs font-medium py-2.5">
+                                                Awaiting Challenger…
+                                            </div>
+                                            {/* Owner can also enter their own room instantly */}
+                                            <Button
+                                                onClick={() => onEnterRoom(challenge)}
+                                                className="w-full bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white border-0 shadow-lg shadow-emerald-500/20 font-bold"
+                                            >
+                                                <Zap className="h-4 w-4 mr-2" />
+                                                Join Instantly
+                                            </Button>
                                         </div>
                                     )}
 
