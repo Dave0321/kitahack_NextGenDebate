@@ -45,6 +45,11 @@ import {
 } from "@/lib/utils/debate-judge";
 import type { TopicContent, DebateJudgement } from "@/lib/models/debate-result";
 import { PostDebateSummaryModal } from "@/components/debate/post-debate-summary-modal";
+import {
+    appendConversationMessage,
+    getConversationMessages,
+} from "@/lib/firebase/conversation-service";
+import { isFirebaseConfigured } from "@/lib/firebase/config";
 
 // ---------------------------------------------------------------------------
 // Props & Types
@@ -246,9 +251,26 @@ export function DebateRoomPage({
         return () => window.removeEventListener("storage", handleStorage);
     }, [challenge.id, isAIDebate]);
 
-    // Load initial messages for demo
+    // Load initial messages: from Firebase when configured, else from localStorage (demo)
     useEffect(() => {
-        if (!isAIDebate && typeof window !== "undefined") {
+        if (typeof window === "undefined") return;
+        if (isFirebaseConfigured()) {
+            getConversationMessages(challenge.id).then((stored) => {
+                if (stored.length > 0) {
+                    setMessages(
+                        stored.map((m) => ({
+                            id: m.id,
+                            player: m.player,
+                            name: m.name,
+                            text: m.text,
+                            timestamp: new Date(m.timestamp),
+                            score: m.score,
+                            flags: m.flags,
+                        }))
+                    );
+                }
+            });
+        } else if (!isAIDebate) {
             const saved = localStorage.getItem(`debate-messages-${challenge.id}`);
             if (saved) {
                 try {
@@ -291,7 +313,13 @@ export function DebateRoomPage({
         ref.current?.scrollIntoView({ behavior: "smooth" });
 
     const sendMessage = useCallback(
-        (player: "pro" | "con", name: string, text: string, flags?: QualityFlag[]) => {
+        (
+            player: "pro" | "con",
+            name: string,
+            text: string,
+            flags?: QualityFlag[],
+            source: "player" | "ai" = "player"
+        ) => {
             if (!text.trim()) return;
             const score = scoreArgument(text);
             const msg: Message = {
@@ -309,6 +337,16 @@ export function DebateRoomPage({
                     localStorage.setItem(`debate-messages-${challenge.id}`, JSON.stringify(newMsgs));
                 }
                 return newMsgs;
+            });
+            // Persist every message (player or AI) to Firebase for Gemini context and history
+            appendConversationMessage(challenge.id, {
+                id: msg.id,
+                player: msg.player,
+                name: msg.name,
+                text: msg.text,
+                score: msg.score,
+                source,
+                flags: msg.flags,
             });
             return msg;
         },
@@ -433,7 +471,7 @@ export function DebateRoomPage({
                 }
             }
 
-            sendMessage(oppRole, opponentName, selectedReply, moderationResult.qualityFlags);
+            sendMessage(oppRole, opponentName, selectedReply, moderationResult.qualityFlags, "ai");
             setOppTyping(false);
         }, 1500 + Math.random() * 2000);
 
